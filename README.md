@@ -40,12 +40,13 @@ following information:
 This application is configured via the environment. The following environment
 variables can be used:
 
-KEY          TYPE                              DEFAULT    REQUIRED    DESCRIPTION
-HELP         True or False                     false                  show this message
-LISTEN_ON    String                            :8000      true        connection on which to listen for an open flow device
-PROXY_TO     String                            :8001      true        connection on which to attach to an SDN controller
-TEE_TO       Comma-separated list of String    :8002                  list of connections on which tee packet in messages
-LOG_LEVEL    String                            debug                  logging level
+KEY                  TYPE                              DEFAULT    REQUIRED    DESCRIPTION
+HELP                 True or False                     false                  show this message
+LISTEN_ON            String                            :8000      true        connection on which to listen for an open flow device
+PROXY_TO             String                            :8001      true        connection on which to attach to an SDN controller
+TEE_TO               Comma-separated list of String    :8002                  list of connections on which tee packet in messages
+LOG_LEVEL            String                            debug                  logging level
+SHARE_CONNECTIONS    True or False                     true                   use shared connections to outbound end points
 ```
 
 ### Tee Configuration
