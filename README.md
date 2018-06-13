@@ -1,24 +1,29 @@
-tcptee
-======
+# OpenFlow [PACKET_IN] Tee
 
-tcptee is a simple tcp traffic duplicator.
+This is a utility filter that sits between and OpenFlow device and the
+OpenFlow controller. This filter bidirectionally passes, as is, all
+traffic between the device and the controller. Additionally, this filter
+can be configured to *tee* OpenFlow *packet in* messages to third party
+applications via `Kafka` (future) and `REST`.
 
-Usage
------
+The purpose of this utility filter is to allow the development if SDN
+applications that execute outside the SDN controller processes, i.e,
+that don't have to be written for a specific SDN controller such as
+`ONOS` or `ODL`.
 
-    ./tcptee -bind :8000 -backends :2015,:2016,:2017
+## SDN Application Initialization
+To utilize the OpenFlow tee the *external* SDN application or operator
+must perform some initialization so that the OpenFlow device does a
+packet in to the controller on the desired packets and the *tee* forwards
+the desired packets to the external SDN application.
 
-Example
--------
+![Application Initialization](app_init.png)
 
-    go run echo_server.go -bind :8001
-    go run echo_server.go -bind :8002
-    go run tcptee.go -bind :8000 -backends :8001,:8002
-    echo 'Hello world' | nc 127.0.0.1 8000
+## SDN Application Behavior
+While the SDN application receives packet in packets from the OpenFlow
+Tee, if should use the controller's API to influence an open flow device
+or to emit a packet back into the open flow network.
 
-Or run this script: [example.sh](./example.sh)
-
-License
--------
-
-BSD.
+![Application Behavior](app_behavior.png)
+It is possible and expected for the SDN to communicate over the network
+to other services or applications outside the OpenFlow network.
