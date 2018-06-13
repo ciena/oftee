@@ -63,7 +63,7 @@ func min(a, b int) int {
 }
 
 // Handle a single connection from a device
-func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) {
+func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 	var err error
 	var buffer *bytes.Buffer = new(bytes.Buffer)
 	var match criteria.Criteria
@@ -75,7 +75,14 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) {
 
 	// Create connection to SDN controller
 	proxy := new(connections.TcpConnection)
-	proxy.Connection, err = net.Dial("tcp", app.ProxyTo)
+	if proxy.Connection, err = net.Dial("tcp", app.ProxyTo); err != nil {
+		log.
+			WithFields(log.Fields{"proxy": app.ProxyTo}).
+			WithError(err).
+			Error("Unable to connect to SDN controller")
+		return err
+	}
+
 	proxy.Criteria = criteria.Criteria{}
 
 	// Anything from the controller, just send to the device
@@ -88,30 +95,32 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) {
 		// a serious error, so fail fast and move on
 		hCount, err = header.ReadFrom(reader)
 		if err != nil {
-			log.WithFields(log.Fields{
-				"error": err.Error(),
-			}).Debug("Failed to read OpenFlow message header")
-			break
+			log.
+				WithError(err).
+				Debug("Failed to read OpenFlow message header")
+			return err
 		}
 
 		// If we have a packet in message then this will be tee-ed
 		// to those end points that match, else we just proxy to
 		// the controller.
 		if header.Type == of.TypePacketIn {
-			log.WithFields(log.Fields{
-				"of_version":     header.Version,
-				"of_message":     header.Type.String(),
-				"of_transaction": header.Transaction,
-				"length":         header.Length,
-			}).Debug("SENDING: all end-points")
+			log.
+				WithFields(log.Fields{
+					"of_version":     header.Version,
+					"of_message":     header.Type.String(),
+					"of_transaction": header.Transaction,
+					"length":         header.Length,
+				}).
+				Debug("SENDING: all end-points")
 
 			// Read the packet in message header
 			piCount, err = packetIn.ReadFrom(reader)
 			if err != nil {
-				log.WithFields(log.Fields{
-					"error": err.Error(),
-				}).Debug("Failed to read OpenFlow Packet In message header")
-				break
+				log.
+					WithError(err).
+					Debug("Failed to read OpenFlow Packet In message header")
+				return err
 			}
 
 			// Reset the buffer to read the packet in message and
@@ -125,8 +134,10 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) {
 			for left > 0 {
 				count, err = reader.Read(buf[:min(int(left), BUFFER_SIZE)])
 				if err != nil {
-					log.Debugf("ERROR %s", err)
-					break
+					log.
+						WithError(err).
+						Error("Failed to read complete message")
+					return err
 				}
 				buffer.Write(buf[:count])
 				left -= uint16(count)
@@ -169,8 +180,10 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) {
 			for left > 0 {
 				count, err = reader.Read(buf[:min(int(left), BUFFER_SIZE)])
 				if err != nil {
-					log.Debugf("ERROR %s", err)
-					break
+					log.
+						WithError(err).
+						Error("Failed to read complete message")
+					return err
 				}
 				proxy.Write(buf[:count])
 				// TODO loop until all bytes are written
@@ -217,21 +230,27 @@ func (app *App) EstablishEndpointConnections() (connections.Endpoints, error) {
 						match.Set |= criteria.BIT_DL_TYPE
 						match.DlType = uint16(ethType)
 						if err != nil {
-							log.WithFields(log.Fields{
-								"term":  terms[0],
-								"value": terms[1],
-							}).Error("Unable to convert term to uint16")
+							log.
+								WithFields(log.Fields{
+									"term":  terms[0],
+									"value": terms[1],
+								}).
+								Error("Unable to convert term to uint16")
 							return nil, err
 						}
-						log.WithFields(log.Fields{
-							"term":  terms[0],
-							"value": terms[1],
-						}).Debug("Found condition")
+						log.
+							WithFields(log.Fields{
+								"term":  terms[0],
+								"value": terms[1],
+							}).
+							Debug("Found condition")
 					default:
-						log.WithFields(log.Fields{
-							"term":  terms[0],
-							"value": terms[1],
-						}).Error("Unknown end point term")
+						log.
+							WithFields(log.Fields{
+								"term":  terms[0],
+								"value": terms[1],
+							}).
+							Error("Unknown end point term")
 						return nil, fmt.Errorf("Unknown end point term '%s'", terms[0])
 					}
 				}
@@ -240,10 +259,10 @@ func (app *App) EstablishEndpointConnections() (connections.Endpoints, error) {
 			// Read schema from connection string
 			u, err = url.Parse(addr)
 			if err != nil {
-				log.WithFields(log.Fields{
-					"connect": addr,
-					"error":   err,
-				}).Error("Unable to parse connection string")
+				log.
+					WithFields(log.Fields{"connect": addr}).
+					WithError(err).
+					Error("Unable to parse connection string")
 				return nil, err
 			}
 			switch strings.ToLower(u.Scheme) {
@@ -263,10 +282,10 @@ func (app *App) EstablishEndpointConnections() (connections.Endpoints, error) {
 				err = nil
 			}
 			if err != nil {
-				log.WithFields(log.Fields{
-					"connection": addr,
-					"error":      err,
-				}).Error("Unable to connect to outbound end point")
+				log.
+					WithFields(log.Fields{"connection": addr}).
+					WithError(err).
+					Error("Unable to connect to outbound end point")
 				return nil, err
 			} else {
 				log.WithFields(log.Fields{
@@ -298,9 +317,9 @@ func (app *App) ListenAndServe() (err error) {
 		conn, err := app.listener.Accept()
 		if err != nil {
 			// Not fatal if a connection fails, forget it and move on
-			log.WithFields(log.Fields{
-				"error": err,
-			}).Error("Error while accepting connection")
+			log.
+				WithError(err).
+				Error("Error while accepting connection")
 			continue
 		}
 		log.Debugf("Received connection: %s", conn.RemoteAddr().String())
@@ -308,9 +327,9 @@ func (app *App) ListenAndServe() (err error) {
 		if !app.ShareConnections {
 			endpoints, err = app.EstablishEndpointConnections()
 			if err != nil {
-				log.WithFields(log.Fields{
-					"error": err,
-				}).Error("Unable to establish non-shared outbound endpoint connections")
+				log.
+					WithError(err).
+					Error("Unable to establish non-shared outbound endpoint connections")
 				continue
 			}
 		}
