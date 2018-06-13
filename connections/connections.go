@@ -1,12 +1,24 @@
+// Provides definitions and protocol specific implementations for end point
+// connections. Its primary responsibility is to abstract the specifics of
+// end point communication, publish of OpenFlow messages, away from protocol
+// specifics, such that the main `oftee` loop can operate against a connection
+// independently of protocol specifics.
 package connections
 
 import (
 	"io"
 
-	"github.com/ciena/oftee/conditions"
+	"github.com/ciena/oftee/criteria"
 )
 
+// Interface to an endpoint connection. This interface abstracts away the
+// `io.Writer` capability as well as the ability to match packet criteria
+// against a packet.
+//
+// Match compares the connections match criteria against a given criteria,
+// presumably derived from an existing packet. Returns `true` if
+// the criteria matches, else `false`.
 type Connection interface {
 	io.Writer
-	Match(conditions conditions.Conditions) bool
+	Match(state criteria.Criteria) bool
 }

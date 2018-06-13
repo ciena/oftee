@@ -1,3 +1,6 @@
+// OFTEE command to start a OpenFlow tee proxy. This command parses the
+// environment for configuration information and then starts a processing
+// loop for OpenFlow messages.
 package main
 
 import (
@@ -11,8 +14,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ciena/oftee/conditions"
 	"github.com/ciena/oftee/connections"
+	"github.com/ciena/oftee/criteria"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/kelseyhightower/envconfig"
@@ -22,12 +25,15 @@ import (
 )
 
 const (
+	// Buffer size when reading
 	BUFFER_SIZE = 2048
 
+	// Supported and future supported URL schemes
 	SCHEME_TCP   = "tcp"
 	SCHEME_HTTP  = "http"
-	SCHEMA_KAFKA = "kafka"
+	SCHEME_KAFKA = "kafka"
 
+	// Supported end point configuration terms
 	TERM_ACTION  = "action"
 	TERM_DL_TYPE = "dl_type"
 )
@@ -43,6 +49,9 @@ type App struct {
 	listener net.Listener
 }
 
+// Why or why does Go not have a simply int minimum function, ok, i get it,
+// proverb A little copying is better than a little dependency, but this could
+// be part of a standard lib
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -50,19 +59,20 @@ func min(a, b int) int {
 	return b
 }
 
+// Handle a single connection to a device
 func (app *App) handle(conn net.Conn) {
 	var err error
 	var u *url.URL
 	var c connections.Connection
 	var hc *connections.HttpConnection
 	var tcp *connections.TcpConnection
-	var buffer *bytes.Buffer = nil
-	var proxied, buffered connections.Outbound
-	var list *connections.Outbound
-	var match conditions.Conditions
+	var buffer *bytes.Buffer = new(bytes.Buffer)
+	var endpoints connections.Endpoints = make([]connections.Connection,
+		len(app.TeeTo)+1) // Tees + proxy
+	var match criteria.Criteria
 	var addr string
 	var parts, terms []string
-	for _, spec := range append([]string{app.ProxyTo}, app.TeeTo...) {
+	for i, spec := range append([]string{app.ProxyTo}, app.TeeTo...) {
 		log.Debugf("SPEC: %s", spec)
 		if len(spec) != 0 {
 
@@ -71,21 +81,19 @@ func (app *App) handle(conn net.Conn) {
 			// Where [match] is a list of match terms, currently
 			// only dl_type is supported.
 			parts = strings.Split(spec, ";")
-			log.Debugf("PARTS: %+v", parts)
-			match = conditions.Conditions{}
+			match = criteria.Criteria{}
 			if len(parts) == 1 {
 				addr = spec
 			} else {
 				addr = ""
 				for _, part := range parts {
 					terms = strings.Split(part, "=")
-					log.Debugf("%s --> %s and %d", part, terms[0], terms[1])
 					switch strings.ToLower(terms[0]) {
 					case TERM_ACTION:
 						addr = terms[1]
 					case TERM_DL_TYPE:
 						ethType, err := strconv.ParseUint(terms[1], 0, 16)
-						match.Set |= conditions.BIT_DL_TYPE
+						match.Set |= criteria.BIT_DL_TYPE
 						match.DlType = uint16(ethType)
 						if err != nil {
 							log.WithFields(log.Fields{
@@ -121,17 +129,14 @@ func (app *App) handle(conn net.Conn) {
 			case SCHEME_TCP:
 				tcp = new(connections.TcpConnection)
 				tcp.Connection, err = net.Dial("tcp", u.Host)
-				tcp.Conditions = match
+				tcp.Criteria = match
 				c = *tcp
-				list = &proxied
 			case SCHEME_HTTP:
 				hc = new(connections.HttpConnection)
 				hc.Connection = *u
-				hc.Conditions = match
+				hc.Criteria = match
 				c = *hc
 				err = nil
-				buffer = new(bytes.Buffer)
-				list = &buffered
 			}
 			if err != nil {
 				log.WithFields(log.Fields{
@@ -145,14 +150,14 @@ func (app *App) handle(conn net.Conn) {
 					"tcp":        tcp,
 					"hc":         hc,
 					"host":       u.Host,
-				}).Infof("Created outbound connection")
-				*list = append(*list, c)
+				}).Infof("Created outbound end point connection")
+				endpoints[i] = c
 			}
 		}
 	}
 
 	// Anything from the controller, just send to the device
-	go io.Copy(conn, proxied[0].(connections.TcpConnection).Connection)
+	go io.Copy(conn, endpoints[0].(connections.TcpConnection).Connection)
 
 	reader := bufio.NewReaderSize(conn, BUFFER_SIZE)
 	buf := make([]byte, BUFFER_SIZE)
@@ -190,13 +195,13 @@ func (app *App) handle(conn net.Conn) {
 				break
 			}
 
-			header.WriteTo(proxied)
-			packetIn.WriteTo(proxied)
-			if buffer != nil {
-				buffer.Reset()
-				header.WriteTo(buffer)
-				packetIn.WriteTo(buffer)
-			}
+			// Reset the buffer to read the packet in message and
+			// write the headers to the buffer
+			buffer.Reset()
+			header.WriteTo(buffer)
+			packetIn.WriteTo(buffer)
+
+			// Read and buffer the rest of the packet
 			left = header.Length - uint16(hCount) - uint16(piCount)
 			for left > 0 {
 				count, err = reader.Read(buf[:min(int(left), BUFFER_SIZE)])
@@ -204,23 +209,21 @@ func (app *App) handle(conn net.Conn) {
 					log.Debugf("ERROR %s", err)
 					break
 				}
-				proxied.Write(buf[:count])
-				if buffer != nil {
-					buffer.Write(buf[:count])
-				}
+				buffer.Write(buf[:count])
 				left -= uint16(count)
 			}
-			// Send message to those outbound connections that
-			// require buffering
-			if buffer != nil {
-				pkt := gopacket.NewPacket(buffer.Bytes()[hCount+piCount:], layers.LayerTypeEthernet, gopacket.DecodeOptions{Lazy: true, NoCopy: true})
-				eth := pkt.Layer(layers.LayerTypeEthernet)
-				match = conditions.Conditions{
-					Set:    conditions.BIT_DL_TYPE,
-					DlType: uint16(eth.(*layers.Ethernet).EthernetType),
-				}
-				buffered.ConditionalWrite(buffer.Bytes(), match)
+
+			// Load and decode the packet being packeted in so we
+			// can compare match criteria
+			pkt := gopacket.NewPacket(buffer.Bytes()[hCount+piCount:],
+				layers.LayerTypeEthernet,
+				gopacket.DecodeOptions{Lazy: true, NoCopy: true})
+			eth := pkt.Layer(layers.LayerTypeEthernet)
+			match = criteria.Criteria{
+				Set:    criteria.BIT_DL_TYPE,
+				DlType: uint16(eth.(*layers.Ethernet).EthernetType),
 			}
+			endpoints.ConditionalWrite(buffer.Bytes(), match)
 		} else {
 			log.WithFields(log.Fields{
 				"of_version":     header.Version,
@@ -228,7 +231,7 @@ func (app *App) handle(conn net.Conn) {
 				"of_transaction": header.Transaction,
 				"length":         header.Length,
 			}).Debug("SENDING: SDN controller")
-			header.WriteTo(proxied[0])
+			header.WriteTo(endpoints[0])
 			left = header.Length - uint16(hCount)
 			for left > 0 {
 				count, err = reader.Read(buf[:min(int(left), BUFFER_SIZE)])
@@ -236,7 +239,7 @@ func (app *App) handle(conn net.Conn) {
 					log.Debugf("ERROR %s", err)
 					break
 				}
-				proxied[0].Write(buf[:count])
+				endpoints[0].Write(buf[:count])
 
 				left -= uint16(count)
 			}
@@ -252,7 +255,6 @@ func (app *App) ListenAndServe() (err error) {
 	app.listener, err = net.Listen("tcp", app.ListenOn)
 	if err != nil {
 		log.Fatalf("Unable to establish the ability to listen on connection '%s' : %s", app.ListenOn, err)
-		return err
 	}
 
 	// Loop forever waiting for a connection and processing it
@@ -282,11 +284,12 @@ func main() {
 
 	// Load the application configuration from the environment and initialize
 	// the logging system
-	err = envconfig.Process("myapp", &app)
+	err = envconfig.Process("", &app)
 	if err != nil {
 		log.Fatalf("Unable to parse configuration : %s\n", err)
 	}
 
+	// Set the logging level, if it can't be parsed then default to warning
 	logLevel, err := log.ParseLevel(app.LogLevel)
 	if err != nil {
 		log.Warnf("Unable to parse log level specififed '%s', defaulting to 'warning' : %s", app.LogLevel, err)
@@ -296,7 +299,7 @@ func main() {
 
 	// If the help message is requested, then display and return
 	if app.ShowHelp {
-		envconfig.Usage("", &(app))
+		envconfig.Usage("", &app)
 		return
 	}
 
