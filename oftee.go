@@ -36,7 +36,7 @@ const (
 type App struct {
 	ShowHelp bool     `envconfig:"HELP" default:"false" desc:"show this message"`
 	ListenOn string   `envconfig:"LISTEN_ON" default:":8000" required:"true" desc:"connection on which to listen for an open flow device"`
-	ProxyTo  string   `envconfig:"PROXY_TO" default:":8001" required:"true" desc:"connection on which to attach to an SDN controler"`
+	ProxyTo  string   `envconfig:"PROXY_TO" default:":8001" required:"true" desc:"connection on which to attach to an SDN controller"`
 	TeeTo    []string `envconfig:"TEE_TO" default:":8002" desc:"list of connections on which tee packet in messages"`
 	LogLevel string   `envconfig:"LOG_LEVEL" default:"debug" desc:"logging level"`
 
