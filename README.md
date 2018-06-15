@@ -1,10 +1,11 @@
-# OpenFlow [PACKET_IN] Tee
+# OpenFlow Tee
 
 This is a utility filter that sits between and OpenFlow device and the
 OpenFlow controller. This filter bidirectionally passes, as is, all
-traffic between the device and the controller. Additionally, this filter
+traffic between the device and the controller. This filter
 can be configured to *tee* OpenFlow *packet in* messages to third party
-applications via `Kafka` (future) and `REST`.
+applications via `Kafka` (future) and `REST` as well as supports an API
+(currently `REST` only) to *packet out* messages to a switch ports.
 
 The purpose of this utility filter is to allow the development if SDN
 applications that execute outside the SDN controller processes, i.e,
@@ -22,7 +23,9 @@ the desired packets to the external SDN application.
 ## SDN Application Behavior
 While the SDN application receives packet in packets from the OpenFlow
 Tee, if should use the controller's API to influence an open flow device
-or to emit a packet back into the open flow network.
+or to emit a packet back into the open flow network. Because most SDN
+controllers do not support and API to allow packet out emits to a device, this
+application does support a `REST` API to support the capability.
 
 ![Application Behavior](app_behavior.png)
 
