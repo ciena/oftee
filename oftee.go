@@ -15,8 +15,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ciena/oftee/api"
 	"github.com/ciena/oftee/connections"
 	"github.com/ciena/oftee/criteria"
+	"github.com/ciena/oftee/injector"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/kelseyhightower/envconfig"
@@ -43,6 +45,7 @@ const (
 type App struct {
 	ShowHelp         bool     `envconfig:"HELP" default:"false" desc:"show this message"`
 	ListenOn         string   `envconfig:"LISTEN_ON" default:":8000" required:"true" desc:"connection on which to listen for an open flow device"`
+	ApiOn            string   `envconfig:"API_ON" default:":8002" required:"true" desc:"port on which to listen to accept API requests"`
 	ProxyTo          string   `envconfig:"PROXY_TO" default:":8001" required:"true" desc:"connection on which to attach to an SDN controller"`
 	TeeTo            []string `envconfig:"TEE_TO" default:":8002" desc:"list of connections on which tee packet in messages"`
 	LogLevel         string   `envconfig:"LOG_LEVEL" default:"debug" desc:"logging level"`
@@ -50,6 +53,7 @@ type App struct {
 
 	listener  net.Listener
 	endpoints connections.Endpoints
+	api       *api.Api
 }
 
 // Why or why does Go not have a simply int minimum function, ok, i get it,
@@ -70,8 +74,9 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 	var header of.Header
 	var hCount, piCount int64
 	var left uint16
-	var count int
+	// var count int
 	var packetIn ofp.PacketIn
+	var featuresReply ofp.SwitchFeatures
 
 	// Create connection to SDN controller
 	proxy := new(connections.TcpConnection)
@@ -84,12 +89,12 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 	}
 
 	proxy.Criteria = criteria.Criteria{}
+	inject := injector.NewInjector()
 
 	// Anything from the controller, just send to the device
-	go io.Copy(conn, proxy.Connection)
+	go inject.Copy(conn, proxy.Connection)
 
 	reader := bufio.NewReaderSize(conn, BUFFER_SIZE)
-	buf := make([]byte, BUFFER_SIZE)
 	for {
 		// Read open flow header, if this does not work then we have
 		// a serious error, so fail fast and move on
@@ -104,7 +109,8 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 		// If we have a packet in message then this will be tee-ed
 		// to those end points that match, else we just proxy to
 		// the controller.
-		if header.Type == of.TypePacketIn {
+		switch header.Type {
+		case of.TypePacketIn:
 			log.
 				WithFields(log.Fields{
 					"of_version":     header.Version,
@@ -128,20 +134,12 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 			buffer.Reset()
 			header.WriteTo(buffer)
 			packetIn.WriteTo(buffer)
+			wc := len(buffer.Bytes())
+			log.Debugf("HEADER: %d", wc)
 
 			// Read and buffer the rest of the packet
 			left = header.Length - uint16(hCount) - uint16(piCount)
-			for left > 0 {
-				count, err = reader.Read(buf[:min(int(left), BUFFER_SIZE)])
-				if err != nil {
-					log.
-						WithError(err).
-						Error("Failed to read complete message")
-					return err
-				}
-				buffer.Write(buf[:count])
-				left -= uint16(count)
-			}
+			io.CopyN(buffer, reader, int64(left))
 
 			// Load and decode the packet being packeted in so we
 			// can compare match criteria
@@ -160,10 +158,32 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 			// TODO loop until all bytes are written
 			// TODO if error is returned and connection is broken, reconnect
 
-			endpoints.ConditionalWrite(buffer.Bytes(), match)
+			_, err = endpoints.ConditionalWrite(buffer.Bytes()[wc:], match)
 			// TODO loop until all bytes are written
 			// TODO if error is returned and connection is broken, reconnect
-		} else {
+		case of.TypeFeaturesReply:
+			log.WithFields(log.Fields{
+				"of_version":     header.Version,
+				"of_message":     header.Type.String(),
+				"of_transaction": header.Transaction,
+				"length":         header.Length,
+			}).Debug("Sniffing for DPID")
+
+			piCount, err = featuresReply.ReadFrom(reader)
+			app.api.DpidMappingListener <- api.DpidMapping{
+				Action: api.MAP_ACTION_ADD,
+				Dpid:   featuresReply.DatapathID,
+				Inject: inject,
+			}
+			inject.SetDpid(featuresReply.DatapathID)
+			log.WithFields(log.Fields{
+				"dpid": fmt.Sprintf("0x%016x", featuresReply.DatapathID),
+			}).Debug("Sniffed DPID")
+			header.WriteTo(proxy)
+			featuresReply.WriteTo(proxy)
+			left = header.Length - uint16(hCount) - uint16(piCount)
+			io.CopyN(proxy, reader, int64(left))
+		default:
 			// All messages that are not packet in messages are
 			// only proxied to the SDN controller. No buffering,
 			// just grab bits, push bits.
@@ -177,20 +197,7 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 			// TODO if error is returned and connection is broken, reconnect
 
 			left = header.Length - uint16(hCount)
-			for left > 0 {
-				count, err = reader.Read(buf[:min(int(left), BUFFER_SIZE)])
-				if err != nil {
-					log.
-						WithError(err).
-						Error("Failed to read complete message")
-					return err
-				}
-				proxy.Write(buf[:count])
-				// TODO loop until all bytes are written
-				// TODO if error is returned and connection is broken, reconnect
-
-				left -= uint16(count)
-			}
+			io.CopyN(proxy, reader, int64(left))
 		}
 	}
 }
@@ -308,7 +315,12 @@ func (app *App) ListenAndServe() (err error) {
 	// Bind to connection for accepting connections
 	app.listener, err = net.Listen("tcp", app.ListenOn)
 	if err != nil {
-		log.Fatalf("Unable to establish the ability to listen on connection '%s' : %s", app.ListenOn, err)
+		log.
+			WithFields(log.Fields{
+				"listen-port": app.ListenOn,
+			}).
+			WithError(err).
+			Fatalf("Unable to establish the ability to listen on connection for OpenFlow devices")
 	}
 
 	// Loop forever waiting for a connection and processing it
@@ -322,7 +334,9 @@ func (app *App) ListenAndServe() (err error) {
 				Error("Error while accepting connection")
 			continue
 		}
-		log.Debugf("Received connection: %s", conn.RemoteAddr().String())
+		log.WithFields(log.Fields{
+			"remote-connection": conn.RemoteAddr().String(),
+		}).Debug("Received connection")
 		endpoints = app.endpoints
 		if !app.ShareConnections {
 			endpoints, err = app.EstablishEndpointConnections()
@@ -354,13 +368,18 @@ func main() {
 	// the logging system
 	err = envconfig.Process("", &app)
 	if err != nil {
-		log.Fatalf("Unable to parse configuration : %s\n", err)
+		log.WithError(err).Fatal("Unable to parse application configuration")
 	}
 
 	// Set the logging level, if it can't be parsed then default to warning
 	logLevel, err := log.ParseLevel(app.LogLevel)
 	if err != nil {
-		log.Warnf("Unable to parse log level specififed '%s', defaulting to 'warning' : %s", app.LogLevel, err)
+		log.
+			WithFields(log.Fields{
+				"log-level": app.LogLevel,
+			}).
+			WithError(err).
+			Warn("Unable to parse log level specified, defaulting to Warning")
 		logLevel = log.WarnLevel
 	}
 	log.SetLevel(logLevel)
@@ -371,14 +390,17 @@ func main() {
 		return
 	}
 
+	// Create and invoke the API sub-system
+	app.api = api.NewApi(app.ApiOn)
+	go app.api.ListenAndServe()
+
 	// Connect to shared outbound end point connections, if requested
 	if app.ShareConnections {
 		if app.endpoints, err = app.EstablishEndpointConnections(); err != nil {
-			log.Fatalf("Unable to establish connections to outbound end points, terminating : %s",
-				err.Error())
+			log.WithError(err).Fatal("Unable to establish connections to outbound end points, terminating")
 		}
 	}
 
-	// Listen and serve requests
+	// Listen and serve device requests
 	log.Fatal(app.ListenAndServe())
 }
