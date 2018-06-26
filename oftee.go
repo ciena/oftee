@@ -6,6 +6,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"flag"
 	"fmt"
 	"io"
@@ -57,6 +58,26 @@ type App struct {
 	api       *api.Api
 }
 
+type OpenFlowContext struct {
+	DatapathID uint64
+	Port       uint32
+}
+
+func (c *OpenFlowContext) String() string {
+	return fmt.Sprintf("[0x%016x, 0x%04x]", c.DatapathID, c.Port)
+}
+
+func (c *OpenFlowContext) Len() uint16 {
+	return 12
+}
+
+func (c *OpenFlowContext) WriteTo(w io.Writer) (int, error) {
+	buf := make([]byte, 12)
+	binary.BigEndian.PutUint64(buf, c.DatapathID)
+	binary.BigEndian.PutUint32(buf[8:], c.Port)
+	return w.Write(buf)
+}
+
 // Why or why does Go not have a simply int minimum function, ok, i get it,
 // proverb A little copying is better than a little dependency, but this could
 // be part of a standard lib
@@ -73,6 +94,7 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 	var buffer *bytes.Buffer = new(bytes.Buffer)
 	var match criteria.Criteria
 	var header of.Header
+	var context OpenFlowContext
 	var hCount, piCount int64
 	var left uint16
 	// var count int
@@ -132,15 +154,24 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 				return err
 			}
 
+			// Look for the port in contained in the message
+			for _, xm := range packetIn.Match.Fields {
+				if xm.Type == ofp.XMTypeInPort {
+					context.Port = binary.BigEndian.Uint32(xm.Value)
+				}
+			}
+
 			// Reset the buffer to read the packet in message and
 			// write the headers to the buffer
+			// TODO need to check errors
 			buffer.Reset()
+			context.WriteTo(buffer)
 			header.WriteTo(buffer)
 			packetIn.WriteTo(buffer)
 
 			// Load and decode the packet being packeted in so we
 			// can compare match criteria
-			pkt := gopacket.NewPacket(buffer.Bytes()[header.Length-packetIn.Length:header.Length],
+			pkt := gopacket.NewPacket(packetIn.Data,
 				layers.LayerTypeEthernet,
 				gopacket.DecodeOptions{Lazy: true, NoCopy: true})
 			eth := pkt.Layer(layers.LayerTypeEthernet)
@@ -160,22 +191,22 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 
 			// packet in to the SDN controller and packet out
 			// to those end points that match the criteria
-			proxy.Write(buffer.Bytes()[:header.Length])
-
+			proxy.Write(buffer.Bytes()[context.Len() : context.Len()+header.Length])
 			// TODO loop until all bytes are written
 			// TODO if error is returned and connection is broken, reconnect
 
 			log.
 				WithFields(log.Fields{
-					"size":     header.Length,
+					"context":  context.String(),
 					"openflow": fmt.Sprintf("%02x", buffer.Bytes()[:header.Length-packetIn.Length]),
 					"packet":   fmt.Sprintf("%02x", buffer.Bytes()[header.Length-packetIn.Length:header.Length]),
 				}).
 				Debug("packet in")
+
 			if app.TeeRawPackets {
-				endpoints.ConditionalWrite(buffer.Bytes()[header.Length-packetIn.Length:header.Length], match)
+				endpoints.ConditionalWrite(packetIn.Data, match)
 			} else {
-				endpoints.ConditionalWrite(buffer.Bytes()[:header.Length], match)
+				endpoints.ConditionalWrite(buffer.Bytes()[:context.Len()+header.Length], match)
 			}
 			// TODO loop until all bytes are written
 			// TODO if error is returned and connection is broken, reconnect
@@ -194,6 +225,7 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 				Inject: inject,
 			}
 			inject.SetDpid(featuresReply.DatapathID)
+			context.DatapathID = featuresReply.DatapathID
 			log.WithFields(log.Fields{
 				"dpid": fmt.Sprintf("0x%016x", featuresReply.DatapathID),
 			}).Debug("Sniffed DPID")
