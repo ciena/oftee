@@ -15,12 +15,17 @@ type HttpConnection struct {
 	Criteria   criteria.Criteria
 }
 
+// Connection in string form
+func (c HttpConnection) String() string {
+	return c.Connection.String()
+}
+
 // Writes the specified bytes to the connection by performing a `HTTP POST`
 // to the connection `URL`. It is expected that when using this method in
 // the context of the OFTee that the entire packet will be represented in a
 // single `Write`, although this is not strictly required.
 func (c HttpConnection) Write(b []byte) (n int, err error) {
-	_, err = http.Post(c.Connection.String(), "application/data", bytes.NewReader(b))
+	_, err = http.Post(c.Connection.String(), "application/octet-stream", bytes.NewReader(b))
 	return len(b), err
 }
 

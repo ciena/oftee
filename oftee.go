@@ -48,6 +48,7 @@ type App struct {
 	ApiOn            string   `envconfig:"API_ON" default:":8002" required:"true" desc:"port on which to listen to accept API requests"`
 	ProxyTo          string   `envconfig:"PROXY_TO" default:":8001" required:"true" desc:"connection on which to attach to an SDN controller"`
 	TeeTo            []string `envconfig:"TEE_TO" default:":8002" desc:"list of connections on which tee packet in messages"`
+	TeeRawPackets    bool     `envconfig:"TEE_RAW" default:"true" desc:"only tee raw packets to the client, openflow headers not included"`
 	LogLevel         string   `envconfig:"LOG_LEVEL" default:"debug" desc:"logging level"`
 	ShareConnections bool     `envconfig:"SHARE_CONNECTIONS" default:"true" desc:"use shared connections to outbound end points"`
 
@@ -120,8 +121,10 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 				}).
 				Debug("SENDING: all end-points")
 
-			// Read the packet in message header
-			piCount, err = packetIn.ReadFrom(reader)
+			// Read the packet in message header, have to create a LimitReader as the ofp.packetIn
+			// interface does an io.ReadAll, which will read more than the frame size. This reads
+			// the packet in header and the packet.
+			piCount, err = packetIn.ReadFrom(io.LimitReader(reader, int64(header.Length)-hCount))
 			if err != nil {
 				log.
 					WithError(err).
@@ -134,31 +137,46 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 			buffer.Reset()
 			header.WriteTo(buffer)
 			packetIn.WriteTo(buffer)
-			wc := len(buffer.Bytes())
-			log.Debugf("HEADER: %d", wc)
-
-			// Read and buffer the rest of the packet
-			left = header.Length - uint16(hCount) - uint16(piCount)
-			io.CopyN(buffer, reader, int64(left))
 
 			// Load and decode the packet being packeted in so we
 			// can compare match criteria
-			pkt := gopacket.NewPacket(buffer.Bytes()[hCount+piCount:],
+			pkt := gopacket.NewPacket(buffer.Bytes()[header.Length-packetIn.Length:header.Length],
 				layers.LayerTypeEthernet,
 				gopacket.DecodeOptions{Lazy: true, NoCopy: true})
 			eth := pkt.Layer(layers.LayerTypeEthernet)
+			if eth == nil {
+				log.Debug("Not ethernet packet, can't match")
+				continue
+			}
+			log.
+				WithFields(log.Fields{
+					"dl_type": fmt.Sprintf("0x%04x", uint16(eth.(*layers.Ethernet).EthernetType)),
+				}).
+				Debug("match")
 			match = criteria.Criteria{
 				Set:    criteria.BIT_DL_TYPE,
 				DlType: uint16(eth.(*layers.Ethernet).EthernetType),
 			}
 
-			// packet out to the SDN controller and packet out
+			// packet in to the SDN controller and packet out
 			// to those end points that match the criteria
-			proxy.Write(buffer.Bytes())
+			proxy.Write(buffer.Bytes()[:header.Length])
+
 			// TODO loop until all bytes are written
 			// TODO if error is returned and connection is broken, reconnect
 
-			_, err = endpoints.ConditionalWrite(buffer.Bytes()[wc:], match)
+			log.
+				WithFields(log.Fields{
+					"size":     header.Length,
+					"openflow": fmt.Sprintf("%02x", buffer.Bytes()[:header.Length-packetIn.Length]),
+					"packet":   fmt.Sprintf("%02x", buffer.Bytes()[header.Length-packetIn.Length:header.Length]),
+				}).
+				Debug("packet in")
+			if app.TeeRawPackets {
+				endpoints.ConditionalWrite(buffer.Bytes()[header.Length-packetIn.Length:header.Length], match)
+			} else {
+				endpoints.ConditionalWrite(buffer.Bytes()[:header.Length], match)
+			}
 			// TODO loop until all bytes are written
 			// TODO if error is returned and connection is broken, reconnect
 		case of.TypeFeaturesReply:

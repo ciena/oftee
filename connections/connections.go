@@ -21,4 +21,5 @@ import (
 type Connection interface {
 	io.Writer
 	Match(state criteria.Criteria) bool
+	String() string
 }

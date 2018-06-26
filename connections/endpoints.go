@@ -2,6 +2,7 @@ package connections
 
 import (
 	"github.com/ciena/oftee/criteria"
+	log "github.com/sirupsen/logrus"
 )
 
 // Endpoints represents a list (array) of connections
@@ -26,6 +27,14 @@ func (eps Endpoints) Write(b []byte) (n int, err error) {
 // remaining writes is not attempted and an error is returned.
 func (eps Endpoints) ConditionalWrite(b []byte, state criteria.Criteria) (n int, err error) {
 	for _, conn := range eps {
+		if log.GetLevel() == log.DebugLevel {
+			log.
+				WithFields(log.Fields{
+					"connection": conn.String(),
+					"match":      conn.Match(state),
+				}).
+				Debug("Checking")
+		}
 		if conn.Match(state) {
 			n, err = conn.Write(b)
 			if err != nil {

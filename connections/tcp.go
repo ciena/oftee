@@ -14,6 +14,11 @@ type TcpConnection struct {
 	Criteria   criteria.Criteria
 }
 
+// Connection in string form
+func (c TcpConnection) String() string {
+	return c.Connection.RemoteAddr().String()
+}
+
 // Writes the specified bytes to the connection by performing a
 // `net.Conn.Write` to the connection.
 //
