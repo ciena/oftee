@@ -49,6 +49,7 @@ LISTEN_ON            String                            :8000      true        co
 API_ON               String                            :8002      true        port on which to listen to accept API requests
 PROXY_TO             String                            :8001      true        connection on which to attach to an SDN controller
 TEE_TO               Comma-separated list of String    :8002                  list of connections on which tee packet in messages
+TEE_RAW              True or False                     true                   only tee raw packets to the client, openflow headers not included
 LOG_LEVEL            String                            debug                  logging level
 SHARE_CONNECTIONS    True or False                     true                   use shared connections to outbound end points
 ```
