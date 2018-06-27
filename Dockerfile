@@ -6,16 +6,16 @@ MAINTAINER David Bainbridge <dbainbri@ciena.com>
 RUN apk --update add git
 
 # Copy in the source
-WORKDIR /go/src/app
-COPY . .
+WORKDIR /go/src
+COPY . /go/src/github.com/ciena/oftee
 
 # Build with everything statically linked
 ENV CGO_ENABLED=0
-RUN go get -d -v ./... && go install -v ./...
+RUN go install github.com/ciena/oftee
 
 # Stage two, create the runtime image
 FROM scratch
-COPY --from=build /go/bin/app /oftee
+COPY --from=build /go/bin/oftee /oftee
 
 # Run as nobody, because you can't be sure of which GID/UID to use
 # and people should start a container with --user
