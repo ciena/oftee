@@ -24,7 +24,7 @@ type Criteria struct {
 // state criteria and their values are equal. The state criteria may have
 // additional values that are not in the target criteria and the values will
 // still be considered matched.
-func (c Criteria) Match(state Criteria) bool {
+func (c *Criteria) Match(state Criteria) bool {
 	if c.Set&BIT_DL_TYPE > 0 && (state.Set&BIT_DL_TYPE == 0 || c.DlType != state.DlType) {
 		return false
 	}

@@ -255,7 +255,6 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 func (app *App) EstablishEndpointConnections() (connections.Endpoints, error) {
 	var u *url.URL
 	var c connections.Connection
-	var hc *connections.HttpConnection
 	var tcp *connections.TcpConnection
 	var match criteria.Criteria
 	var addr string
@@ -327,15 +326,16 @@ func (app *App) EstablishEndpointConnections() (connections.Endpoints, error) {
 				u.Host = addr
 				fallthrough
 			case SCHEME_TCP:
-				tcp = new(connections.TcpConnection)
+				tcp = &connections.TcpConnection{
+					Criteria: match,
+				}
 				tcp.Connection, err = net.Dial("tcp", u.Host)
-				tcp.Criteria = match
-				c = *tcp
+				c = tcp
 			case SCHEME_HTTP:
-				hc = new(connections.HttpConnection)
-				hc.Connection = *u
-				hc.Criteria = match
-				c = *hc
+				c = &connections.HttpConnection{
+					Connection: *u,
+					Criteria:   match,
+				}
 				err = nil
 			}
 			if err != nil {
@@ -348,10 +348,9 @@ func (app *App) EstablishEndpointConnections() (connections.Endpoints, error) {
 				log.WithFields(log.Fields{
 					"connection": addr,
 					"c":          c,
-					"tcp":        tcp,
-					"hc":         hc,
 					"host":       u.Host,
-				}).Infof("Created outbound end point connection")
+				}).Info("Created outbound end point connection")
+				go c.ListenAndSend()
 				endpoints[i] = c
 			}
 		}

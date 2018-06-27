@@ -13,10 +13,7 @@ type Endpoints []Connection
 // of the remaining writes is not attempted and an error is returned.
 func (eps Endpoints) Write(b []byte) (n int, err error) {
 	for _, conn := range eps {
-		n, err = conn.Write(b)
-		if err != nil {
-			return 0, err
-		}
+		conn.GetQueue() <- b
 	}
 	return n, nil
 }
@@ -36,10 +33,7 @@ func (eps Endpoints) ConditionalWrite(b []byte, state criteria.Criteria) (n int,
 				Debug("Checking")
 		}
 		if conn.Match(state) {
-			n, err = conn.Write(b)
-			if err != nil {
-				return 0, err
-			}
+			conn.GetQueue() <- b
 		}
 	}
 	return n, nil

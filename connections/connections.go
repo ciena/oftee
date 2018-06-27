@@ -6,8 +6,6 @@
 package connections
 
 import (
-	"io"
-
 	"github.com/ciena/oftee/criteria"
 )
 
@@ -19,7 +17,8 @@ import (
 // presumably derived from an existing packet. Returns `true` if
 // the criteria matches, else `false`.
 type Connection interface {
-	io.Writer
 	Match(state criteria.Criteria) bool
+	GetQueue() chan<- []byte
+	ListenAndSend() error
 	String() string
 }
