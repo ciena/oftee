@@ -198,8 +198,8 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 			log.
 				WithFields(log.Fields{
 					"context":  context.String(),
-					"openflow": fmt.Sprintf("%02x", buffer.Bytes()[:header.Length-packetIn.Length]),
-					"packet":   fmt.Sprintf("%02x", buffer.Bytes()[header.Length-packetIn.Length:header.Length]),
+					"openflow": fmt.Sprintf("%02x", buffer.Bytes()[context.Len():context.Len()+header.Length-packetIn.Length]),
+					"packet":   fmt.Sprintf("%02x", packetIn.Data),
 				}).
 				Debug("packet in")
 
