@@ -42,7 +42,7 @@ func (c *HttpConnection) ListenAndSend() error {
 	for {
 		select {
 		case message := <-c.queue:
-			if log.GetLevel() > log.DebugLevel {
+			if log.GetLevel() >= log.DebugLevel {
 				log.
 					WithFields(log.Fields{
 						"data": fmt.Sprintf("%02x", message),

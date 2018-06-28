@@ -24,7 +24,7 @@ func (eps Endpoints) Write(b []byte) (n int, err error) {
 // remaining writes is not attempted and an error is returned.
 func (eps Endpoints) ConditionalWrite(b []byte, state criteria.Criteria) (n int, err error) {
 	for _, conn := range eps {
-		if log.GetLevel() == log.DebugLevel {
+		if log.GetLevel() >= log.DebugLevel {
 			log.
 				WithFields(log.Fields{
 					"connection": conn.String(),
