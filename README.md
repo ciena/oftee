@@ -1,4 +1,4 @@
-# OpenFlow Tee
+# OpenFlow Tee [![GoDoc](https://godoc.org/github.com/ciena/oftee?status.svg)](https://godoc.org/github.com/ciena/oftee)
 
 This is a utility filter that sits between and OpenFlow device and the
 OpenFlow controller. This filter bidirectionally passes, as is, all

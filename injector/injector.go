@@ -113,7 +113,8 @@ func (i *Injector) Copy(dst io.Writer, src io.Reader) (int64, error) {
 			// that the length of the Frame is the same as the
 			// size of the message array
 			log.WithFields(log.Fields{
-				"dpid": fmt.Sprintf("0x%016x", i.Dpid),
+				"dpid":    fmt.Sprintf("0x%016x", i.Dpid),
+				"message": fmt.Sprintf("%02x", message),
 			}).Debug("Writing packet out to device")
 			_, err = dst.Write(message)
 			if err != nil {
