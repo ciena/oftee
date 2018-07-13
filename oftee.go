@@ -140,6 +140,7 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 					"of_message":     header.Type.String(),
 					"of_transaction": header.Transaction,
 					"length":         header.Length,
+					"header_length":  hCount,
 				}).
 				Debug("SENDING: all end-points")
 
@@ -147,7 +148,7 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 			// interface does an io.ReadAll, which will read more than the frame size. This reads
 			// the packet in header and the packet.
 			piCount, err = packetIn.ReadFrom(io.LimitReader(reader, int64(header.Length)-hCount))
-			if err != nil {
+			if err != nil || piCount != int64(header.Length)-hCount {
 				log.
 					WithError(err).
 					Debug("Failed to read OpenFlow Packet In message header")
@@ -176,7 +177,12 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 				gopacket.DecodeOptions{Lazy: true, NoCopy: true})
 			eth := pkt.Layer(layers.LayerTypeEthernet)
 			if eth == nil {
-				log.Debug("Not ethernet packet, can't match")
+				log.
+					WithFields(log.Fields{
+						"packet": fmt.Sprintf("%02x", packetIn.Data),
+						"buffer": fmt.Sprintf("%02x", buffer),
+					}).
+					Debug("Not ethernet packet, can't match")
 				continue
 			}
 			log.
