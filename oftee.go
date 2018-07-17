@@ -90,20 +90,46 @@ func min(a, b int) int {
 
 // Handle a single connection from a device
 func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
-	var err error
-	var buffer *bytes.Buffer = new(bytes.Buffer)
-	var match criteria.Criteria
-	var header of.Header
-	var context OpenFlowContext
-	var hCount, piCount int64
-	var left uint16
-	// var count int
-	var packetIn ofp.PacketIn
-	var featuresReply ofp.SwitchFeatures
+	var (
+		err             error
+		buffer          *bytes.Buffer = new(bytes.Buffer)
+		match           criteria.Criteria
+		header          of.Header
+		context         OpenFlowContext
+		hCount, piCount int64
+		left            uint16
+		packetIn        ofp.PacketIn
+		featuresReply   ofp.SwitchFeatures
+		proxyUrl        *url.URL
+		proxyTarget     string
+	)
+
+	// Parse URL to proxy
+	if strings.Index(app.ProxyTo, "://") == -1 {
+		proxyTarget = app.ProxyTo
+	} else {
+		if proxyUrl, err = url.Parse(app.ProxyTo); err != nil {
+			log.
+				WithFields(log.Fields{"proxy": app.ProxyTo}).
+				WithError(err).
+				Error("Unable to parse URL to SDN controller")
+			return err
+		}
+		if proxyUrl.Scheme != "tcp" {
+			log.
+				WithFields(log.Fields{
+					"scheme": proxyUrl.Scheme,
+					"proxy":  app.ProxyTo,
+				}).
+				Error("Only TCP connections are supported to SDN controller")
+			return err
+		}
+		proxyTarget = proxyUrl.Host
+	}
 
 	// Create connection to SDN controller
 	proxy := new(connections.TcpConnection)
-	if proxy.Connection, err = net.Dial("tcp", app.ProxyTo); err != nil {
+	if proxy.Connection, err = net.Dial("tcp", proxyTarget); err != nil {
 		log.
 			WithFields(log.Fields{"proxy": app.ProxyTo}).
 			WithError(err).
