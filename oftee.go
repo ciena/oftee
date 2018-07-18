@@ -90,6 +90,10 @@ func min(a, b int) int {
 
 // Handle a single connection from a device
 func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
+
+	// Close the connection when we are no longer handling it
+	defer conn.Close()
+
 	var (
 		err             error
 		buffer          *bytes.Buffer = new(bytes.Buffer)
@@ -137,6 +141,7 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 		return err
 	}
 
+	defer proxy.Connection.Close()
 	proxy.Criteria = criteria.Criteria{}
 	inject := injector.NewInjector()
 
