@@ -29,6 +29,8 @@ type Injector struct {
 	controllerError chan error
 	injector        chan []byte
 	headerReadWait  chan bool
+	headerStop      chan bool
+	mainStop        chan bool
 }
 
 // Creates and Injector instance.
@@ -39,6 +41,8 @@ func NewInjector() *Injector {
 		controllerError: make(chan error),
 		injector:        make(chan []byte),
 		headerReadWait:  make(chan bool),
+		headerStop:      make(chan bool),
+		mainStop:        make(chan bool),
 	}
 }
 
@@ -53,16 +57,25 @@ func (i *Injector) readHeaders(src io.Reader) {
 	var err error
 	var tlv tlvHeader
 	for {
-		tlv.size, err = tlv.header.ReadFrom(src)
-		if err != nil {
-			i.controllerError <- err
-			break
-		}
-		i.controller <- tlv
+		select {
+		case <-i.headerStop:
+			return
+		default:
+			tlv.size, err = tlv.header.ReadFrom(src)
+			if err != nil {
+				i.controllerError <- err
+				return
+			}
+			i.controller <- tlv
 
-		// Pause reading from controller, until rest of packet message
-		// is copied from the controller to the device
-		<-i.headerReadWait
+			// Pause reading from controller, until rest of packet message
+			// is copied from the controller to the device
+			select {
+			case <-i.headerStop:
+				return
+			case <-i.headerReadWait:
+			}
+		}
 	}
 }
 
@@ -73,6 +86,11 @@ func (i *Injector) Inject(message []byte) {
 
 func (i *Injector) SetDpid(dpid uint64) {
 	i.dpid <- dpid
+}
+
+func (i *Injector) Stop() {
+	i.headerStop <- true
+	i.mainStop <- true
 }
 
 // Copies OpenFlow messages from the source (`src`) to the destination (`dest`).
@@ -90,6 +108,8 @@ func (i *Injector) Copy(dst io.Writer, src io.Reader) (int64, error) {
 	// injected as a packet out
 	for {
 		select {
+		case <-i.mainStop:
+			return 0, nil
 		case i.Dpid = <-i.dpid:
 		case tlv = <-i.controller:
 			tlv.header.WriteTo(dst)
@@ -123,7 +143,8 @@ func (i *Injector) Copy(dst io.Writer, src io.Reader) (int64, error) {
 						"dpid": fmt.Sprintf("0x%016x", i.Dpid),
 					}).
 					WithError(err).
-					Fatal("Error while attempting to write packet to device")
+					Error("Error while attempting to write packet to device")
+				return 0, err
 
 			}
 		}

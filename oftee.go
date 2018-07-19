@@ -88,6 +88,17 @@ func min(a, b int) int {
 	return b
 }
 
+func (app *App) cleanup() {
+}
+
+func (app *App) removeInjector(inject *injector.Injector) {
+	app.api.DpidMappingListener <- api.DpidMapping{
+		Action: api.MAP_ACTION_DELETE,
+		Dpid:   inject.Dpid,
+		Inject: nil,
+	}
+}
+
 // Handle a single connection from a device
 func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 
@@ -144,6 +155,8 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 	defer proxy.Connection.Close()
 	proxy.Criteria = criteria.Criteria{}
 	inject := injector.NewInjector()
+	defer inject.Stop()
+	defer app.removeInjector(inject)
 
 	// Anything from the controller, just send to the device
 	go inject.Copy(conn, proxy.Connection)
