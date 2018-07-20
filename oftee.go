@@ -49,7 +49,7 @@ type App struct {
 	ApiOn            string   `envconfig:"API_ON" default:":8002" required:"true" desc:"port on which to listen to accept API requests"`
 	ProxyTo          string   `envconfig:"PROXY_TO" default:":8001" required:"true" desc:"connection on which to attach to an SDN controller"`
 	TeeTo            []string `envconfig:"TEE_TO" default:":8002" desc:"list of connections on which tee packet in messages"`
-	TeeRawPackets    bool     `envconfig:"TEE_RAW" default:"true" desc:"only tee raw packets to the client, openflow headers not included"`
+	TeeRawPackets    bool     `envconfig:"TEE_RAW" default:"false" desc:"only tee raw packets to the client, openflow headers not included"`
 	LogLevel         string   `envconfig:"LOG_LEVEL" default:"debug" desc:"logging level"`
 	ShareConnections bool     `envconfig:"SHARE_CONNECTIONS" default:"true" desc:"use shared connections to outbound end points"`
 
