@@ -18,7 +18,7 @@ func (eps Endpoints) Write(b []byte) (n int, err error) {
 	return n, nil
 }
 
-// Iterates over all endpoint connections and if the connection's criteria
+// ConditionalWrite iterates over all endpoint connections and if the connection's criteria
 // matches the given state critera then write the given bytes to the connection.
 // If a write to an any single connection fails then processing of the
 // remaining writes is not attempted and an error is returned.

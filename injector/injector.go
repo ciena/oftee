@@ -1,4 +1,4 @@
-// This package supports sending OF messages from the SDN controller to
+// Package injector supports sending OF messages from the SDN controller to
 // a device. This package is required to allow the sideways injection of
 // PacketOut messages into the message stream from the SDN controller.
 //
@@ -23,7 +23,7 @@ type tlvHeader struct {
 
 // Injector type
 type Injector struct {
-	Dpid            uint64
+	DPID            uint64
 	dpid            chan uint64
 	controller      chan tlvHeader
 	controllerError chan error
@@ -33,7 +33,7 @@ type Injector struct {
 	mainStop        chan bool
 }
 
-// Creates and Injector instance.
+// NewInjector creates an Injector instance.
 func NewInjector() *Injector {
 	return &Injector{
 		dpid:            make(chan uint64),
@@ -79,21 +79,23 @@ func (i *Injector) readHeaders(src io.Reader) {
 	}
 }
 
-// Public packet injection method (packet out)
+// Inject injects a packet to the managed device (packet out)
 func (i *Injector) Inject(message []byte) {
 	i.injector <- message
 }
 
-func (i *Injector) SetDpid(dpid uint64) {
+// SetDPID associates a DPID with an injector
+func (i *Injector) SetDPID(dpid uint64) {
 	i.dpid <- dpid
 }
 
+// Stop sends stop messages to the go routines
 func (i *Injector) Stop() {
 	i.headerStop <- true
 	i.mainStop <- true
 }
 
-// Copies OpenFlow messages from the source (`src`) to the destination (`dest`).
+// Copy copies OpenFlow messages from the source (`src`) to the destination (`dest`).
 // The copy my respect the boundaries of the OpenFlow messages so that PacketOut
 // messages can be inject into the stream without corrupting it.
 func (i *Injector) Copy(dst io.Writer, src io.Reader) (int64, error) {
@@ -110,7 +112,7 @@ func (i *Injector) Copy(dst io.Writer, src io.Reader) (int64, error) {
 		select {
 		case <-i.mainStop:
 			return 0, nil
-		case i.Dpid = <-i.dpid:
+		case i.DPID = <-i.dpid:
 		case tlv = <-i.controller:
 			tlv.header.WriteTo(dst)
 			_, err = io.CopyN(dst, src, int64(tlv.header.Length)-tlv.size)
@@ -133,14 +135,14 @@ func (i *Injector) Copy(dst io.Writer, src io.Reader) (int64, error) {
 			// that the length of the Frame is the same as the
 			// size of the message array
 			log.WithFields(log.Fields{
-				"dpid":    fmt.Sprintf("0x%016x", i.Dpid),
+				"dpid":    fmt.Sprintf("0x%016x", i.DPID),
 				"message": fmt.Sprintf("%02x", message),
 			}).Debug("Writing packet out to device")
 			_, err = dst.Write(message)
 			if err != nil {
 				log.
 					WithFields(log.Fields{
-						"dpid": fmt.Sprintf("0x%016x", i.Dpid),
+						"dpid": fmt.Sprintf("0x%016x", i.DPID),
 					}).
 					WithError(err).
 					Error("Error while attempting to write packet to device")

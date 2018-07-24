@@ -1,4 +1,4 @@
-// This package implements the oftee API that can be used for injecting
+// Package api implements the oftee API that can be used for injecting
 // packets to the open flow devices
 package api
 
@@ -16,7 +16,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// Define DPID mapping actions
+// MappingAction defines DPID mapping actions
 type MappingAction uint8
 
 const (
@@ -25,16 +25,16 @@ const (
 	MAP_ACTION_DELETE MappingAction = 1 << 1
 )
 
-// Used to associate a DPID with an injecting packet processor
-type DpidMapping struct {
+// DPIDMapping is used to associate a DPID with an injecting packet processor
+type DPIDMapping struct {
 	Action MappingAction
-	Dpid   uint64
+	DPID   uint64
 	Inject *injector.Injector
 }
 
-// OFTEE API
-type Api struct {
-	DpidMappingListener chan DpidMapping
+// API maintains the configuration and runtime information for the API
+type API struct {
+	DPIDMappingListener chan DPIDMapping
 	ListenOn            string
 
 	injectors map[uint64]*injector.Injector
@@ -42,13 +42,13 @@ type Api struct {
 	lock      sync.RWMutex
 }
 
-// Used to create a HTTP response that lists all the known DPIDs
+// DevicesResponse is used to create a HTTP response that lists all the known DPIDs
 type DevicesResponse struct {
 	Devices []string `json:"devices"`
 }
 
-// Returns an list of DPIDs known to the system as a JSON array
-func (api *Api) ListDevicesHandler(resp http.ResponseWriter, req *http.Request) {
+// ListDevicesHandler returns a list of DPIDs known to the system as a JSON array
+func (api *API) ListDevicesHandler(resp http.ResponseWriter, req *http.Request) {
 
 	// Create the response object
 	api.lock.RLock()
@@ -56,7 +56,7 @@ func (api *Api) ListDevicesHandler(resp http.ResponseWriter, req *http.Request) 
 		Devices: make([]string, len(api.injectors)),
 	}
 	i := 0
-	for key, _ := range api.injectors {
+	for key := range api.injectors {
 		data.Devices[i] = fmt.Sprintf("of:0x%016x", key)
 		i += 1
 	}
@@ -73,10 +73,10 @@ func (api *Api) ListDevicesHandler(resp http.ResponseWriter, req *http.Request) 
 	resp.Write(bytes)
 }
 
-// Handles an HTTP request to packet out to a given switch port. The payload to
+// PacketOutHandler handles an HTTP request to packet out to a given switch port. The payload to
 // the request should be the []byte of a OpenFlow packet out message, including
 // the open flow header, the packet out header, and the packet.
-func (api *Api) PacketOutHandler(resp http.ResponseWriter, req *http.Request) {
+func (api *API) PacketOutHandler(resp http.ResponseWriter, req *http.Request) {
 	defer req.Body.Close()
 
 	// Parse the URL for the target device's DPID
@@ -117,41 +117,41 @@ func (api *Api) PacketOutHandler(resp http.ResponseWriter, req *http.Request) {
 }
 
 // Loop that listens for updates of DPID mappings
-func (api *Api) dpidMappingUpdates() {
+func (api *API) dpidMappingUpdates() {
 	for {
-		mapping := <-api.DpidMappingListener
+		mapping := <-api.DPIDMappingListener
 
 		switch mapping.Action {
 		case MAP_ACTION_ADD:
 			log.WithFields(log.Fields{
-				"dpid": fmt.Sprintf("0x%016x", mapping.Dpid),
+				"dpid": fmt.Sprintf("0x%016x", mapping.DPID),
 			}).Debug("Adding device mapping")
 			api.lock.Lock()
-			api.injectors[mapping.Dpid] = mapping.Inject
+			api.injectors[mapping.DPID] = mapping.Inject
 			api.lock.Unlock()
 		case MAP_ACTION_DELETE:
 			log.WithFields(log.Fields{
-				"dpid": fmt.Sprintf("0x%016x", mapping.Dpid),
+				"dpid": fmt.Sprintf("0x%016x", mapping.DPID),
 			}).Debug("Deleting device mapping")
 			api.lock.Lock()
-			delete(api.injectors, mapping.Dpid)
+			delete(api.injectors, mapping.DPID)
 			api.lock.Unlock()
 		default:
 			log.WithFields(log.Fields{
-				"dpid":   fmt.Sprintf("0x%016x", mapping.Dpid),
+				"dpid":   fmt.Sprintf("0x%016x", mapping.DPID),
 				"action": mapping.Action,
 			}).Warn("Received unknown device mapping action")
 		}
 	}
 }
 
-// Properly instantiates a new API instance.
-func NewApi(listenOn string) *Api {
-	api := &Api{
+// NewAPI properly instantiates a new API instance.
+func NewAPI(listenOn string) *API {
+	api := &API{
 		ListenOn:            listenOn,
 		router:              mux.NewRouter(),
 		injectors:           make(map[uint64]*injector.Injector),
-		DpidMappingListener: make(chan DpidMapping),
+		DPIDMappingListener: make(chan DPIDMapping),
 	}
 
 	api.router.
@@ -165,10 +165,11 @@ func NewApi(listenOn string) *Api {
 	return api
 }
 
-func (api *Api) ListenAndServe() {
+// ListenAndServe implements the API service loop
+func (api *API) ListenAndServe() {
 
 	// TODO It is good Go practice to handle structures that arrive
-	// "unitialized". This should be done here, so NewApi does not "have" to
+	// "unitialized". This should be done here, so NewAPI does not "have" to
 	// be called.
 
 	srv := &http.Server{

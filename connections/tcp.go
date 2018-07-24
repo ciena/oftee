@@ -9,29 +9,29 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// TCP based connection implementation. The connection is represented as a
-// net.Conn
-type TcpConnection struct {
+// TCPConnection is the TCP based connection implementation. The connection is
+// represented as a net.Conn
+type TCPConnection struct {
 	Connection net.Conn
 	Criteria   criteria.Criteria
 	queue      chan []byte
 }
 
-// Initializer to make sure priviate members, that can't function from
+// Initialize makes sure priviate members, that can't function from
 // zero state, are set correctly
-func (c *TcpConnection) Initialize() *TcpConnection {
+func (c *TCPConnection) Initialize() *TCPConnection {
 	c.queue = make(chan []byte, 25)
 	return c
 }
 
-// Returns the channel used to queue messages up for delivery
-func (c *TcpConnection) GetQueue() chan<- []byte {
+// GetQueue returns the channel used to queue messages up for delivery
+func (c *TCPConnection) GetQueue() chan<- []byte {
 	return c.queue
 }
 
-// Listens for and processes messages to the target end point over the
-// connection
-func (c *TcpConnection) ListenAndSend() error {
+// ListenAndSend listens for and processes messages to the target end point
+// over the connection
+func (c *TCPConnection) ListenAndSend() error {
 
 	// If queue not created, error out
 	if c.queue == nil {
@@ -65,7 +65,7 @@ func (c *TcpConnection) ListenAndSend() error {
 }
 
 // Connection in string form
-func (c *TcpConnection) String() string {
+func (c *TCPConnection) String() string {
 	if c.queue == nil {
 		return fmt.Sprintf("(%s, %d)", c.Connection.RemoteAddr().String(), -1)
 	}
@@ -81,15 +81,15 @@ func (c *TcpConnection) String() string {
 //
 // When using this method to communicate to the SDN controller, it is not
 // expected to include the entire packet in a single `Write`.
-func (c *TcpConnection) Write(b []byte) (n int, err error) {
+func (c *TCPConnection) Write(b []byte) (n int, err error) {
 	if c.Connection != nil {
 		return c.Connection.Write(b)
 	}
 	return 0, errors.New("No connection established")
 }
 
-// TCP connection implementation of the Match method. Simply calls the
-// `Match` method on the imbeded `Criteria` data.
-func (c *TcpConnection) Match(state criteria.Criteria) bool {
+// Match is the TCP connection implementation of the Match method. Simply
+// calls the `Match` method on the imbeded `Criteria` data.
+func (c *TCPConnection) Match(state criteria.Criteria) bool {
 	return c.Criteria.Match(state)
 }

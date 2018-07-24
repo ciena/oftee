@@ -29,7 +29,7 @@ import (
 )
 
 const (
-	// Buffer size when reading
+	// BUFFER_SIZE Buffer size when reading
 	BUFFER_SIZE = 2048
 
 	// Supported and future supported URL schemes
@@ -42,11 +42,11 @@ const (
 	TERM_DL_TYPE = "dl_type"
 )
 
-// Maintains the application configuration and runtime state
+// App Maintains the application configuration and runtime state
 type App struct {
 	ShowHelp         bool     `envconfig:"HELP" default:"false" desc:"show this message"`
 	ListenOn         string   `envconfig:"LISTEN_ON" default:":8000" required:"true" desc:"connection on which to listen for an open flow device"`
-	ApiOn            string   `envconfig:"API_ON" default:":8002" required:"true" desc:"port on which to listen to accept API requests"`
+	APIOn            string   `envconfig:"API_ON" default:":8002" required:"true" desc:"port on which to listen to accept API requests"`
 	ProxyTo          string   `envconfig:"PROXY_TO" default:":8001" required:"true" desc:"connection on which to attach to an SDN controller"`
 	TeeTo            []string `envconfig:"TEE_TO" default:":8002" desc:"list of connections on which tee packet in messages"`
 	TeeRawPackets    bool     `envconfig:"TEE_RAW" default:"false" desc:"only tee raw packets to the client, openflow headers not included"`
@@ -55,9 +55,10 @@ type App struct {
 
 	listener  net.Listener
 	endpoints connections.Endpoints
-	api       *api.Api
+	api       *api.API
 }
 
+// OpenFlowContext provides context for OF packet in messages
 type OpenFlowContext struct {
 	DatapathID uint64
 	Port       uint32
@@ -67,10 +68,12 @@ func (c *OpenFlowContext) String() string {
 	return fmt.Sprintf("[0x%016x, 0x%04x]", c.DatapathID, c.Port)
 }
 
+// Len returns the length of the OpenFlowContext
 func (c *OpenFlowContext) Len() uint16 {
 	return 12
 }
 
+// WriteTo writes the open flow context to the provided writer
 func (c *OpenFlowContext) WriteTo(w io.Writer) (int64, error) {
 	buf := make([]byte, 12)
 	binary.BigEndian.PutUint64(buf, c.DatapathID)
@@ -93,9 +96,9 @@ func (app *App) cleanup() {
 }
 
 func (app *App) removeInjector(inject *injector.Injector) {
-	app.api.DpidMappingListener <- api.DpidMapping{
+	app.api.DPIDMappingListener <- api.DPIDMapping{
 		Action: api.MAP_ACTION_DELETE,
-		Dpid:   inject.Dpid,
+		DPID:   inject.DPID,
 		Inject: nil,
 	}
 }
@@ -108,7 +111,7 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 
 	var (
 		err             error
-		buffer          *bytes.Buffer = new(bytes.Buffer)
+		buffer          = new(bytes.Buffer)
 		match           criteria.Criteria
 		header          of.Header
 		context         OpenFlowContext
@@ -116,7 +119,7 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 		left            uint16
 		packetIn        ofp.PacketIn
 		featuresReply   ofp.SwitchFeatures
-		proxyUrl        *url.URL
+		proxyURL        *url.URL
 		proxyTarget     string
 	)
 
@@ -124,27 +127,27 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 	if strings.Index(app.ProxyTo, "://") == -1 {
 		proxyTarget = app.ProxyTo
 	} else {
-		if proxyUrl, err = url.Parse(app.ProxyTo); err != nil {
+		if proxyURL, err = url.Parse(app.ProxyTo); err != nil {
 			log.
 				WithFields(log.Fields{"proxy": app.ProxyTo}).
 				WithError(err).
 				Error("Unable to parse URL to SDN controller")
 			return err
 		}
-		if proxyUrl.Scheme != "tcp" {
+		if proxyURL.Scheme != "tcp" {
 			log.
 				WithFields(log.Fields{
-					"scheme": proxyUrl.Scheme,
+					"scheme": proxyURL.Scheme,
 					"proxy":  app.ProxyTo,
 				}).
 				Error("Only TCP connections are supported to SDN controller")
 			return err
 		}
-		proxyTarget = proxyUrl.Host
+		proxyTarget = proxyURL.Host
 	}
 
 	// Create connection to SDN controller
-	proxy := new(connections.TcpConnection)
+	proxy := new(connections.TCPConnection)
 	if proxy.Connection, err = net.Dial("tcp", proxyTarget); err != nil {
 		log.
 			WithFields(log.Fields{"proxy": app.ProxyTo}).
@@ -270,12 +273,12 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 			}).Debug("Sniffing for DPID")
 
 			piCount, err = featuresReply.ReadFrom(reader)
-			app.api.DpidMappingListener <- api.DpidMapping{
+			app.api.DPIDMappingListener <- api.DPIDMapping{
 				Action: api.MAP_ACTION_ADD,
-				Dpid:   featuresReply.DatapathID,
+				DPID:   featuresReply.DatapathID,
 				Inject: inject,
 			}
-			inject.SetDpid(featuresReply.DatapathID)
+			inject.SetDPID(featuresReply.DatapathID)
 			context.DatapathID = featuresReply.DatapathID
 			log.WithFields(log.Fields{
 				"dpid": fmt.Sprintf("0x%016x", featuresReply.DatapathID),
@@ -303,10 +306,12 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 	}
 }
 
+// EstablishEndpointConnections creates connections entities to the configured
+// endpoints specified as configuration options
 func (app *App) EstablishEndpointConnections() (connections.Endpoints, error) {
 	var u *url.URL
 	var c connections.Connection
-	var tcp *connections.TcpConnection
+	var tcp *connections.TCPConnection
 	var match criteria.Criteria
 	var addr string
 	var parts, terms []string
@@ -377,13 +382,13 @@ func (app *App) EstablishEndpointConnections() (connections.Endpoints, error) {
 				u.Host = addr
 				fallthrough
 			case SCHEME_TCP:
-				tcp = (&connections.TcpConnection{
+				tcp = (&connections.TCPConnection{
 					Criteria: match,
 				}).Initialize()
 				tcp.Connection, err = net.Dial("tcp", u.Host)
 				c = tcp
 			case SCHEME_HTTP:
-				c = (&connections.HttpConnection{
+				c = (&connections.HTTPConnection{
 					Connection: *u,
 					Criteria:   match,
 				}).Initialize()
@@ -395,21 +400,20 @@ func (app *App) EstablishEndpointConnections() (connections.Endpoints, error) {
 					WithError(err).
 					Error("Unable to connect to outbound end point")
 				return nil, err
-			} else {
-				log.WithFields(log.Fields{
-					"connection": addr,
-					"c":          c,
-					"host":       u.Host,
-				}).Info("Created outbound end point connection")
-				go c.ListenAndSend()
-				endpoints[i] = c
 			}
+			log.WithFields(log.Fields{
+				"connection": addr,
+				"c":          c,
+				"host":       u.Host,
+			}).Info("Created outbound end point connection")
+			go c.ListenAndSend()
+			endpoints[i] = c
 		}
 	}
 	return endpoints, nil
 }
 
-// Listen for connections from open flow devices and process their
+// ListenAndServe Listen for connections from open flow devices and process their
 // messages
 func (app *App) ListenAndServe() (err error) {
 	// Bind to connection for accepting connections
@@ -491,7 +495,7 @@ func main() {
 	}
 
 	// Create and invoke the API sub-system
-	app.api = api.NewApi(app.ApiOn)
+	app.api = api.NewAPI(app.APIOn)
 	go app.api.ListenAndServe()
 
 	// Connect to shared outbound end point connections, if requested
