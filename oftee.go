@@ -71,11 +71,12 @@ func (c *OpenFlowContext) Len() uint16 {
 	return 12
 }
 
-func (c *OpenFlowContext) WriteTo(w io.Writer) (int, error) {
+func (c *OpenFlowContext) WriteTo(w io.Writer) (int64, error) {
 	buf := make([]byte, 12)
 	binary.BigEndian.PutUint64(buf, c.DatapathID)
 	binary.BigEndian.PutUint32(buf[8:], c.Port)
-	return w.Write(buf)
+	val, err := w.Write(buf)
+	return int64(val), err
 }
 
 // Why or why does Go not have a simply int minimum function, ok, i get it,
@@ -376,16 +377,16 @@ func (app *App) EstablishEndpointConnections() (connections.Endpoints, error) {
 				u.Host = addr
 				fallthrough
 			case SCHEME_TCP:
-				tcp = &connections.TcpConnection{
+				tcp = (&connections.TcpConnection{
 					Criteria: match,
-				}
+				}).Initialize()
 				tcp.Connection, err = net.Dial("tcp", u.Host)
 				c = tcp
 			case SCHEME_HTTP:
-				c = &connections.HttpConnection{
+				c = (&connections.HttpConnection{
 					Connection: *u,
 					Criteria:   match,
-				}
+				}).Initialize()
 				err = nil
 			}
 			if err != nil {

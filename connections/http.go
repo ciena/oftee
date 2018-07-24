@@ -18,12 +18,10 @@ type HttpConnection struct {
 	queue      chan []byte
 }
 
-// Optional constructor function to instantiate and initialize a HTTP
-// connection
-func NewHttpConnection() *HttpConnection {
-	c := &HttpConnection{
-		queue: make(chan []byte, 25),
-	}
+// Initializer to make sure priviate members, that can't function from
+// zero state, are set correctly
+func (c *HttpConnection) Initialize() *HttpConnection {
+	c.queue = make(chan []byte, 25)
 	return c
 }
 
@@ -35,9 +33,12 @@ func (c *HttpConnection) GetQueue() chan<- []byte {
 // Listens for and processes messages to the target end point over the
 // connection
 func (c *HttpConnection) ListenAndSend() error {
-	// If queue not created, create
+	// If queue not created, error out
 	if c.queue == nil {
-		c.queue = make(chan []byte, 25)
+		log.
+			WithError(ErrUninitialized).
+			Error("MUST initialize connection before use")
+		return ErrUninitialized
 	}
 	for {
 		select {

@@ -6,6 +6,7 @@
 package connections
 
 import (
+	"errors"
 	"github.com/ciena/oftee/criteria"
 )
 
@@ -22,3 +23,5 @@ type Connection interface {
 	ListenAndSend() error
 	String() string
 }
+
+var ErrUninitialized = errors.New("connection: attempt to listen on connection before it was initialized")

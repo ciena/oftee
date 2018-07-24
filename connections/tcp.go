@@ -17,12 +17,10 @@ type TcpConnection struct {
 	queue      chan []byte
 }
 
-// Optional constructor function to instantiate and initialize a TCP
-// connection
-func NewTcpConnection() *TcpConnection {
-	c := &TcpConnection{
-		queue: make(chan []byte, 25),
-	}
+// Initializer to make sure priviate members, that can't function from
+// zero state, are set correctly
+func (c *TcpConnection) Initialize() *TcpConnection {
+	c.queue = make(chan []byte, 25)
 	return c
 }
 
@@ -35,9 +33,13 @@ func (c *TcpConnection) GetQueue() chan<- []byte {
 // connection
 func (c *TcpConnection) ListenAndSend() error {
 
-	// If queue not created, create
+	// If queue not created, error out
 	if c.queue == nil {
-		c.queue = make(chan []byte, 25)
+		log.
+			WithError(ErrUninitialized).
+			Error("MUST initialize connection before use")
+		return ErrUninitialized
+
 	}
 	for {
 		select {
