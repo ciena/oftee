@@ -16,9 +16,10 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// App is the application configuration and runtime information
 type App struct {
 	ShowHelp   bool   `envconfig:"HELP" default:"false" desc:"show this message"`
-	OfTeeApi   string `envconfig:"OFTEE_API" default:"http://127.0.0.1:8002" desc:"HOST:PORT on which to connect to OFTEE REST API"`
+	OFTeeAPI   string `envconfig:"OFTEE_API" default:"http://127.0.0.1:8002" desc:"HOST:PORT on which to connect to OFTEE REST API"`
 	Device     string `envconfig:"DEVICE" required:"true" desc:"DPID of device on which to packet out"`
 	Port       string `envconfig:"PORT" required:"true" desc:"Port on device on which to packet out"`
 	PacketFile string `envconfig:"PACKET_FILE" required:"true" desc:"File from which to read packet to send, or '-' for stdin"`
@@ -30,7 +31,11 @@ func main() {
 	var flags flag.FlagSet
 	err := flags.Parse(os.Args[1:])
 	if err != nil {
-		envconfig.Usage("", &(app))
+		if err = envconfig.Usage("", &(app)); err != nil {
+			log.
+				WithError(err).
+				Fatal("Unable to display usage information")
+		}
 		return
 	}
 
@@ -41,7 +46,11 @@ func main() {
 			Fatal("Unable to process configuration")
 	}
 	if app.ShowHelp {
-		envconfig.Usage("", &app)
+		if err = envconfig.Usage("", &(app)); err != nil {
+			log.
+				WithError(err).
+				Fatal("Unable to display usage information")
+		}
 		return
 	}
 
@@ -81,7 +90,9 @@ func main() {
 		data.WriteByte(uint8(val))
 	}
 	if err := scanner.Err(); err != nil {
-		fmt.Fprintln(os.Stderr, "reading input:", err)
+		log.
+			WithError(err).
+			Fatal("Unable to read input")
 	}
 
 	// Process port constants
@@ -123,26 +134,38 @@ func main() {
 	}
 	req := of.NewRequest(of.TypePacketOut, packet)
 
-	pktOut.WriteTo(packet)
-	packet.Write(data.Bytes())
+	if _, err = pktOut.WriteTo(packet); err != nil {
+		log.
+			WithError(err).
+			Fatal("Unable to write packet out to buffer")
+	}
+	if _, err = packet.Write(data.Bytes()); err != nil {
+		log.
+			WithError(err).
+			Fatal("Unable to write packet out data to buffer")
+	}
 
 	message := &bytes.Buffer{}
-	req.WriteTo(message)
+	if _, err = req.WriteTo(message); err != nil {
+		log.
+			WithError(err).
+			Fatal("Unable to write packet out to controller")
+	}
 
 	log.Debug("POSTING")
-	url := fmt.Sprintf("%s/oftee/%s", app.OfTeeApi, app.Device)
+	url := fmt.Sprintf("%s/oftee/%s", app.OFTeeAPI, app.Device)
 	resp, err := http.Post(url, "application/octet-stream", message)
 	if err != nil {
 		log.
 			WithFields(log.Fields{
-				"oftee": app.OfTeeApi,
+				"oftee": app.OFTeeAPI,
 			}).
 			WithError(err).
 			Fatal("Unable to connect to oftee API end point")
 	} else if int(resp.StatusCode/100) != 2 {
 		log.
 			WithFields(log.Fields{
-				"oftee":         app.OfTeeApi,
+				"oftee":         app.OFTeeAPI,
 				"response-code": resp.StatusCode,
 				"response":      resp.Status,
 			}).

@@ -48,7 +48,7 @@ type App struct {
 	ListenOn         string   `envconfig:"LISTEN_ON" default:":8000" required:"true" desc:"connection on which to listen for an open flow device"`
 	APIOn            string   `envconfig:"API_ON" default:":8002" required:"true" desc:"port on which to listen to accept API requests"`
 	ProxyTo          string   `envconfig:"PROXY_TO" default:":8001" required:"true" desc:"connection on which to attach to an SDN controller"`
-	TeeTo            []string `envconfig:"TEE_TO" default:":8002" desc:"list of connections on which tee packet in messages"`
+	TeeTo            []string `envconfig:"TEE_TO" desc:"list of connections on which tee packet in messages"`
 	TeeRawPackets    bool     `envconfig:"TEE_RAW" default:"false" desc:"only tee raw packets to the client, openflow headers not included"`
 	LogLevel         string   `envconfig:"LOG_LEVEL" default:"debug" desc:"logging level"`
 	ShareConnections bool     `envconfig:"SHARE_CONNECTIONS" default:"true" desc:"use shared connections to outbound end points"`
@@ -95,11 +95,20 @@ func min(a, b int) int {
 func (app *App) cleanup() {
 }
 
-func (app *App) removeInjector(inject *injector.Injector) {
+func (app *App) removeInjector(inject injector.Injector) {
 	app.api.DPIDMappingListener <- api.DPIDMapping{
 		Action: api.MAP_ACTION_DELETE,
-		DPID:   inject.DPID,
+		DPID:   inject.GetDPID(),
 		Inject: nil,
+	}
+}
+
+// close wraps an io.Closer.Close call so that any error can be logged
+func close(c io.Closer) {
+	if err := c.Close(); err != nil {
+		log.
+			WithError(err).
+			Error("Error when attempting to close resource")
 	}
 }
 
@@ -107,7 +116,7 @@ func (app *App) removeInjector(inject *injector.Injector) {
 func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 
 	// Close the connection when we are no longer handling it
-	defer conn.Close()
+	defer close(conn)
 
 	var (
 		err             error
@@ -156,9 +165,9 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 		return err
 	}
 
-	defer proxy.Connection.Close()
+	defer close(proxy.Connection)
 	proxy.Criteria = criteria.Criteria{}
-	inject := injector.NewInjector()
+	inject := injector.NewOFDeviceInjector()
 	defer inject.Stop()
 	defer app.removeInjector(inject)
 
@@ -170,7 +179,7 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 		// Read open flow header, if this does not work then we have
 		// a serious error, so fail fast and move on
 		hCount, err = header.ReadFrom(reader)
-		if err != nil {
+		if err != nil && err != io.EOF {
 			log.
 				WithError(err).
 				Debug("Failed to read OpenFlow message header")
@@ -212,11 +221,27 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 
 			// Reset the buffer to read the packet in message and
 			// write the headers to the buffer
-			// TODO need to check errors
 			buffer.Reset()
-			context.WriteTo(buffer)
-			header.WriteTo(buffer)
-			packetIn.WriteTo(buffer)
+			if _, err = context.WriteTo(buffer); err != nil {
+				log.
+					WithError(err).
+					Error("Failed to write OpenFlow context to packet in buffer")
+				return err
+			}
+
+			if _, err = header.WriteTo(buffer); err != nil {
+				log.
+					WithError(err).
+					Error("Failed to write OpenFlow header to packet in buffer")
+				return err
+			}
+
+			if _, err = packetIn.WriteTo(buffer); err != nil {
+				log.
+					WithError(err).
+					Error("Failed to write packet in to packet in buffer")
+				return err
+			}
 
 			// Load and decode the packet being packeted in so we
 			// can compare match criteria
@@ -245,9 +270,13 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 
 			// packet in to the SDN controller and packet out
 			// to those end points that match the criteria
-			proxy.Write(buffer.Bytes()[context.Len() : context.Len()+header.Length])
+			if _, err = proxy.Write(buffer.Bytes()[context.Len() : context.Len()+header.Length]); err != nil {
+				log.
+					WithError(err).
+					Error("Unexpected error while writing packet to controller")
+				return err
+			}
 			// TODO loop until all bytes are written
-			// TODO if error is returned and connection is broken, reconnect
 
 			log.
 				WithFields(log.Fields{
@@ -258,12 +287,17 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 				Debug("packet in")
 
 			if app.TeeRawPackets {
-				endpoints.ConditionalWrite(packetIn.Data, match)
+				_, err = endpoints.ConditionalWrite(packetIn.Data, match)
 			} else {
-				endpoints.ConditionalWrite(buffer.Bytes()[:context.Len()+header.Length], match)
+				_, err = endpoints.ConditionalWrite(buffer.Bytes()[:context.Len()+header.Length], match)
+			}
+			if err != nil {
+				log.
+					WithError(err).
+					Error("Unexpected error while writing to TEE clients")
+				return err
 			}
 			// TODO loop until all bytes are written
-			// TODO if error is returned and connection is broken, reconnect
 		case of.TypeFeaturesReply:
 			log.WithFields(log.Fields{
 				"of_version":     header.Version,
@@ -283,10 +317,27 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 			log.WithFields(log.Fields{
 				"dpid": fmt.Sprintf("0x%016x", featuresReply.DatapathID),
 			}).Debug("Sniffed DPID")
-			header.WriteTo(proxy)
-			featuresReply.WriteTo(proxy)
+			if _, err = header.WriteTo(proxy); err != nil {
+				log.
+					WithError(err).
+					Error("Unexpected error while writing open flow header to controller")
+				return err
+			}
+			if _, err = featuresReply.WriteTo(proxy); err != nil {
+				log.
+					WithError(err).
+					Error("Unexpected error while writing features reply header  to controller")
+				return err
+			}
+
 			left = header.Length - uint16(hCount) - uint16(piCount)
-			io.CopyN(proxy, reader, int64(left))
+			if _, err = io.CopyN(proxy, reader, int64(left)); err != nil {
+				log.
+					WithError(err).
+					Error("Unexpected error while writing features reply header  to controller")
+				return err
+			}
+
 		default:
 			// All messages that are not packet in messages are
 			// only proxied to the SDN controller. No buffering,
@@ -297,11 +348,20 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 				"of_transaction": header.Transaction,
 				"length":         header.Length,
 			}).Debug("SENDING: SDN controller")
-			header.WriteTo(proxy)
-			// TODO if error is returned and connection is broken, reconnect
+			if _, err = header.WriteTo(proxy); err != nil {
+				log.
+					WithError(err).
+					Error("Unexpected error while writing open flow header to controller")
+				return err
+			}
 
 			left = header.Length - uint16(hCount)
-			io.CopyN(proxy, reader, int64(left))
+			if _, err = io.CopyN(proxy, reader, int64(left)); err != nil {
+				log.
+					WithError(err).
+					Error("Unexpected error while writting open flow message body to controller")
+				return err
+			}
 		}
 	}
 }
@@ -451,7 +511,16 @@ func (app *App) ListenAndServe() (err error) {
 				continue
 			}
 		}
-		go app.handle(conn, endpoints)
+		go func() {
+			if err := app.handle(conn, endpoints); err != nil {
+				log.
+					WithError(err).
+					WithFields(log.Fields{
+						"connection": conn,
+					}).
+					Error("Connection to device terminated with an error")
+			}
+		}()
 	}
 }
 
@@ -464,7 +533,11 @@ func main() {
 	var flags flag.FlagSet
 	err := flags.Parse(os.Args[1:])
 	if err != nil {
-		envconfig.Usage("", &(app))
+		if err := envconfig.Usage("", &app); err != nil {
+			log.
+				WithError(err).
+				Error("Unexpected error encountered while displaying usage")
+		}
 		return
 	}
 
@@ -490,7 +563,11 @@ func main() {
 
 	// If the help message is requested, then display and return
 	if app.ShowHelp {
-		envconfig.Usage("", &app)
+		if err := envconfig.Usage("", &app); err != nil {
+			log.
+				WithError(err).
+				Error("Unexpected error encountered while displaying usage")
+		}
 		return
 	}
 

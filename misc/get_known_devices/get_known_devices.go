@@ -11,9 +11,10 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+// App is the application configuration and runtime information
 type App struct {
 	ShowHelp bool   `envconfig:"HELP" default:"false" desc:"show this message"`
-	OfTeeApi string `envconfig:"OFTEE_API" default:"http://127.0.0.1:8002" desc:"HOST:PORT on which to connect to OFTEE REST API"`
+	OFTeeAPI string `envconfig:"OFTEE_API" default:"http://127.0.0.1:8002" desc:"HOST:PORT on which to connect to OFTEE REST API"`
 }
 
 func main() {
@@ -22,7 +23,11 @@ func main() {
 	var flags flag.FlagSet
 	err := flags.Parse(os.Args[1:])
 	if err != nil {
-		envconfig.Usage("", &(app))
+		if err = envconfig.Usage("", &(app)); err != nil {
+			log.
+				WithError(err).
+				Fatal("Unable to display usage information")
+		}
 		return
 	}
 
@@ -31,22 +36,26 @@ func main() {
 		log.WithError(err).Fatal("Unable to parse application configuration")
 	}
 	if app.ShowHelp {
-		envconfig.Usage("", &app)
+		if err = envconfig.Usage("", &(app)); err != nil {
+			log.
+				WithError(err).
+				Fatal("Unable to display usage information")
+		}
 		return
 	}
 
-	resp, err := http.Get(fmt.Sprintf("%s/oftee", app.OfTeeApi))
+	resp, err := http.Get(fmt.Sprintf("%s/oftee", app.OFTeeAPI))
 	if err != nil {
 		log.
 			WithFields(log.Fields{
-				"oftee": app.OfTeeApi,
+				"oftee": app.OFTeeAPI,
 			}).
 			WithError(err).
 			Fatal("Unable to connect to oftee API end point")
 	} else if int(resp.StatusCode/100) != 2 {
 		log.
 			WithFields(log.Fields{
-				"oftee":         app.OfTeeApi,
+				"oftee":         app.OFTeeAPI,
 				"response-code": resp.StatusCode,
 				"response":      resp.Status,
 			}).
@@ -56,7 +65,7 @@ func main() {
 	if err != nil {
 		log.
 			WithFields(log.Fields{
-				"oftee": app.OfTeeApi,
+				"oftee": app.OFTeeAPI,
 			}).
 			WithError(err).
 			Fatal("Unable to read response from oftee")

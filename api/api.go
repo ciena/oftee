@@ -5,6 +5,7 @@ package api
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"strconv"
@@ -29,7 +30,7 @@ const (
 type DPIDMapping struct {
 	Action MappingAction
 	DPID   uint64
-	Inject *injector.Injector
+	Inject injector.Injector
 }
 
 // API maintains the configuration and runtime information for the API
@@ -37,8 +38,9 @@ type API struct {
 	DPIDMappingListener chan DPIDMapping
 	ListenOn            string
 
-	injectors map[uint64]*injector.Injector
+	injectors map[uint64]injector.Injector
 	router    *mux.Router
+	serveMux  *http.ServeMux
 	lock      sync.RWMutex
 }
 
@@ -70,14 +72,19 @@ func (api *API) ListDevicesHandler(resp http.ResponseWriter, req *http.Request) 
 			http.StatusInternalServerError)
 		return
 	}
-	resp.Write(bytes)
+	_, err = resp.Write(bytes)
+	if err != nil {
+		log.
+			WithError(err).
+			Error("Unable to write device list to HTTP response")
+	}
 }
 
 // PacketOutHandler handles an HTTP request to packet out to a given switch port. The payload to
 // the request should be the []byte of a OpenFlow packet out message, including
 // the open flow header, the packet out header, and the packet.
 func (api *API) PacketOutHandler(resp http.ResponseWriter, req *http.Request) {
-	defer req.Body.Close()
+	defer api.close(req.Body)
 
 	// Parse the URL for the target device's DPID
 	vars := mux.Vars(req)
@@ -116,6 +123,15 @@ func (api *API) PacketOutHandler(resp http.ResponseWriter, req *http.Request) {
 	inject.Inject(data)
 }
 
+// close wraps an io.Closer.Close call so that any error can be logged
+func (api *API) close(c io.Closer) {
+	if err := c.Close(); err != nil {
+		log.
+			WithError(err).
+			Error("Error when attempting to close packet out request response")
+	}
+}
+
 // Loop that listens for updates of DPID mappings
 func (api *API) dpidMappingUpdates() {
 	for {
@@ -150,7 +166,8 @@ func NewAPI(listenOn string) *API {
 	api := &API{
 		ListenOn:            listenOn,
 		router:              mux.NewRouter(),
-		injectors:           make(map[uint64]*injector.Injector),
+		serveMux:            http.NewServeMux(),
+		injectors:           make(map[uint64]injector.Injector),
 		DPIDMappingListener: make(chan DPIDMapping),
 	}
 
@@ -161,7 +178,7 @@ func NewAPI(listenOn string) *API {
 	api.router.
 		HandleFunc("/oftee", api.ListDevicesHandler).
 		Methods("GET")
-	http.Handle("/", api.router)
+	api.serveMux.Handle("/", api.router)
 	return api
 }
 
@@ -173,7 +190,8 @@ func (api *API) ListenAndServe() {
 	// be called.
 
 	srv := &http.Server{
-		Addr: api.ListenOn,
+		Addr:    api.ListenOn,
+		Handler: api.serveMux,
 		// Good practice: enforce timeouts for servers you create!
 		WriteTimeout: 15 * time.Second,
 		ReadTimeout:  15 * time.Second,

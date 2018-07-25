@@ -22,7 +22,16 @@ type tlvHeader struct {
 }
 
 // Injector type
-type Injector struct {
+type Injector interface {
+	SetDPID(uint64)
+	GetDPID() uint64
+	Inject([]byte)
+	Stop()
+	Copy(io.Writer, io.Reader) (int64, error)
+}
+
+// OFDeviceInjector implementation of Injector for OpenFlow devices
+type OFDeviceInjector struct {
 	DPID            uint64
 	dpid            chan uint64
 	controller      chan tlvHeader
@@ -33,9 +42,9 @@ type Injector struct {
 	mainStop        chan bool
 }
 
-// NewInjector creates an Injector instance.
-func NewInjector() *Injector {
-	return &Injector{
+// NewOFDeviceInjector creates an Injector instance.
+func NewOFDeviceInjector() Injector {
+	return &OFDeviceInjector{
 		dpid:            make(chan uint64),
 		controller:      make(chan tlvHeader),
 		controllerError: make(chan error),
@@ -53,7 +62,7 @@ func NewInjector() *Injector {
 // having to maintain a [potentially] large byte buffer and transfer this
 // over the channel. You could argue it is not "great" function isolation,
 // but for now it works.
-func (i *Injector) readHeaders(src io.Reader) {
+func (i *OFDeviceInjector) readHeaders(src io.Reader) {
 	var err error
 	var tlv tlvHeader
 	for {
@@ -62,7 +71,7 @@ func (i *Injector) readHeaders(src io.Reader) {
 			return
 		default:
 			tlv.size, err = tlv.header.ReadFrom(src)
-			if err != nil {
+			if err != nil && err != io.EOF {
 				i.controllerError <- err
 				return
 			}
@@ -80,17 +89,22 @@ func (i *Injector) readHeaders(src io.Reader) {
 }
 
 // Inject injects a packet to the managed device (packet out)
-func (i *Injector) Inject(message []byte) {
+func (i *OFDeviceInjector) Inject(message []byte) {
 	i.injector <- message
 }
 
 // SetDPID associates a DPID with an injector
-func (i *Injector) SetDPID(dpid uint64) {
+func (i *OFDeviceInjector) SetDPID(dpid uint64) {
 	i.dpid <- dpid
 }
 
+// GetDPID returns the associated DPID
+func (i *OFDeviceInjector) GetDPID() uint64 {
+	return i.DPID
+}
+
 // Stop sends stop messages to the go routines
-func (i *Injector) Stop() {
+func (i *OFDeviceInjector) Stop() {
 	i.headerStop <- true
 	i.mainStop <- true
 }
@@ -98,7 +112,7 @@ func (i *Injector) Stop() {
 // Copy copies OpenFlow messages from the source (`src`) to the destination (`dest`).
 // The copy my respect the boundaries of the OpenFlow messages so that PacketOut
 // messages can be inject into the stream without corrupting it.
-func (i *Injector) Copy(dst io.Writer, src io.Reader) (int64, error) {
+func (i *OFDeviceInjector) Copy(dst io.Writer, src io.Reader) (int64, error) {
 	var err error
 	var tlv tlvHeader
 	var message []byte
@@ -114,7 +128,12 @@ func (i *Injector) Copy(dst io.Writer, src io.Reader) (int64, error) {
 			return 0, nil
 		case i.DPID = <-i.dpid:
 		case tlv = <-i.controller:
-			tlv.header.WriteTo(dst)
+			_, err = tlv.header.WriteTo(dst)
+			if err != nil {
+				log.
+					WithError(err).
+					Fatal("Error while attempting to write header to device")
+			}
 			_, err = io.CopyN(dst, src, int64(tlv.header.Length)-tlv.size)
 			if err != nil {
 				log.
