@@ -182,7 +182,25 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 	defer app.removeInjector(inject)
 
 	// Anything from the controller, just send to the device
-	go inject.Copy(conn, proxy.Connection)
+	go func(_conn net.Conn, _proxy *connections.TCPConnection, _inject injector.Injector) {
+		// If this fails, bad things are going to happen all over
+		// and we just need to drop the connection to device and
+		// have everything restart
+		if _, err := _inject.Copy(_conn, _proxy.Connection); err != nil {
+			log.
+				WithError(err).
+				WithFields(log.Fields{
+					"proxy": _proxy.Connection,
+				}).
+				Error("Communication from controller to device failed")
+
+			// Force the connection to close, which should
+			// cause the read loop below to fail out
+			if err = _conn.Close(); err != nil {
+				// Ignore
+			}
+		}
+	}(conn, proxy, inject)
 
 	reader := bufio.NewReaderSize(conn, ReadBufferSize)
 	for {
@@ -330,7 +348,7 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 			if _, err = header.WriteTo(proxy); err != nil {
 				log.
 					WithError(err).
-					Error("Unexpected error while writing open flow header to controller")
+					Error("Unexpected error while writing features reply open flow header to controller")
 				return err
 			}
 			if _, err = featuresReply.WriteTo(proxy); err != nil {
@@ -358,15 +376,15 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 				"of_transaction": header.Transaction,
 				"length":         header.Length,
 			}).Debug("SENDING: SDN controller")
-			if _, err = header.WriteTo(proxy); err != nil {
+			if _, err = header.WriteTo(proxy); err != nil && err != io.EOF {
 				log.
 					WithError(err).
-					Error("Unexpected error while writing open flow header to controller")
+					Error("Unexpected error while writing generic open flow header to controller")
 				return err
 			}
 
 			left = header.Length - uint16(hCount)
-			if _, err = io.CopyN(proxy, reader, int64(left)); err != nil {
+			if _, err = io.CopyN(proxy, reader, int64(left)); err != nil && err != io.EOF {
 				log.
 					WithError(err).
 					Error("Unexpected error while writting open flow message body to controller")
@@ -476,7 +494,24 @@ func (app *App) EstablishEndpointConnections() (connections.Endpoints, error) {
 				"c":          c,
 				"host":       u.Host,
 			}).Info("Created outbound end point connection")
-			go c.ListenAndSend()
+
+			// Encapsulated call to ListenAndSend to enable error
+			// checking
+			go func(_c connections.Connection) {
+				for {
+					if err := _c.ListenAndSend(); err != nil {
+						if err == connections.ErrUninitialized {
+							log.
+								WithError(err).
+								Fatal("Attempt to use unitialized connection")
+						} else {
+							log.
+								WithError(err).
+								Fatal("Unexpected error")
+						}
+					}
+				}
+			}(c)
 			endpoints[i] = c
 		}
 	}
@@ -521,16 +556,16 @@ func (app *App) ListenAndServe() (err error) {
 				continue
 			}
 		}
-		go func() {
-			if err := app.handle(conn, endpoints); err != nil {
+		go func(_conn net.Conn, _endpoints connections.Endpoints) {
+			if err := app.handle(_conn, _endpoints); err != nil {
 				log.
 					WithError(err).
 					WithFields(log.Fields{
-						"connection": conn,
+						"connection": _conn,
 					}).
 					Error("Connection to device terminated with an error")
 			}
-		}()
+		}(conn, endpoints)
 	}
 }
 

@@ -129,16 +129,18 @@ func (i *OFDeviceInjector) Copy(dst io.Writer, src io.Reader) (int64, error) {
 		case i.DPID = <-i.dpid:
 		case tlv = <-i.controller:
 			_, err = tlv.header.WriteTo(dst)
-			if err != nil {
+			if err != nil && err != io.EOF {
 				log.
 					WithError(err).
-					Fatal("Error while attempting to write header to device")
+					Error("Error while attempting to write header to device")
+				return 0, err
 			}
 			_, err = io.CopyN(dst, src, int64(tlv.header.Length)-tlv.size)
-			if err != nil {
+			if err != nil && err != io.EOF {
 				log.
 					WithError(err).
-					Fatal("Error while attempting to write packet to device")
+					Error("Error while attempting to write packet to device")
+				return 0, err
 
 			}
 			i.headerReadWait <- true
@@ -158,7 +160,7 @@ func (i *OFDeviceInjector) Copy(dst io.Writer, src io.Reader) (int64, error) {
 				"message": fmt.Sprintf("%02x", message),
 			}).Debug("Writing packet out to device")
 			_, err = dst.Write(message)
-			if err != nil {
+			if err != nil && err != io.EOF {
 				log.
 					WithFields(log.Fields{
 						"dpid": fmt.Sprintf("0x%016x", i.DPID),
