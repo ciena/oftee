@@ -29,17 +29,27 @@ import (
 )
 
 const (
-	// BUFFER_SIZE Buffer size when reading
-	BUFFER_SIZE = 2048
+	// ReadBufferSize Buffer size when reading
+	ReadBufferSize = 2048
 
 	// Supported and future supported URL schemes
-	SCHEME_TCP   = "tcp"
-	SCHEME_HTTP  = "http"
-	SCHEME_KAFKA = "kafka"
+
+	// SchemeTCP prefex for TCP URI scheme
+	SchemeTCP = "tcp"
+
+	// SchemeHTTP prefex for HTTP URI scheme
+	SchemeHTTP = "http"
+
+	// SchemeKafka prefex for Kafka URI scheme
+	SchemeKafka = "kafka"
 
 	// Supported end point configuration terms
-	TERM_ACTION  = "action"
-	TERM_DL_TYPE = "dl_type"
+
+	// TermAction term used in match / action to depict an action
+	TermAction = "action"
+
+	// TermDLType term use in match / action to depict a dl_type match
+	TermDLType = "dl_type"
 )
 
 // App Maintains the application configuration and runtime state
@@ -97,7 +107,7 @@ func (app *App) cleanup() {
 
 func (app *App) removeInjector(inject injector.Injector) {
 	app.api.DPIDMappingListener <- api.DPIDMapping{
-		Action: api.MAP_ACTION_DELETE,
+		Action: api.MapActionDelete,
 		DPID:   inject.GetDPID(),
 		Inject: nil,
 	}
@@ -174,7 +184,7 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 	// Anything from the controller, just send to the device
 	go inject.Copy(conn, proxy.Connection)
 
-	reader := bufio.NewReaderSize(conn, BUFFER_SIZE)
+	reader := bufio.NewReaderSize(conn, ReadBufferSize)
 	for {
 		// Read open flow header, if this does not work then we have
 		// a serious error, so fail fast and move on
@@ -264,7 +274,7 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 				}).
 				Debug("match")
 			match = criteria.Criteria{
-				Set:    criteria.BIT_DL_TYPE,
+				Set:    criteria.BitDLType,
 				DlType: uint16(eth.(*layers.Ethernet).EthernetType),
 			}
 
@@ -308,7 +318,7 @@ func (app *App) handle(conn net.Conn, endpoints connections.Endpoints) error {
 
 			piCount, err = featuresReply.ReadFrom(reader)
 			app.api.DPIDMappingListener <- api.DPIDMapping{
-				Action: api.MAP_ACTION_ADD,
+				Action: api.MapActionAdd,
 				DPID:   featuresReply.DatapathID,
 				Inject: inject,
 			}
@@ -395,11 +405,11 @@ func (app *App) EstablishEndpointConnections() (connections.Endpoints, error) {
 				for _, part := range parts {
 					terms = strings.Split(part, "=")
 					switch strings.ToLower(terms[0]) {
-					case TERM_ACTION:
+					case TermAction:
 						addr = terms[1]
-					case TERM_DL_TYPE:
+					case TermDLType:
 						ethType, err := strconv.ParseUint(terms[1], 0, 16)
-						match.Set |= criteria.BIT_DL_TYPE
+						match.Set |= criteria.BitDLType
 						match.DlType = uint16(ethType)
 						if err != nil {
 							log.
@@ -441,13 +451,13 @@ func (app *App) EstablishEndpointConnections() (connections.Endpoints, error) {
 			default:
 				u.Host = addr
 				fallthrough
-			case SCHEME_TCP:
+			case SchemeTCP:
 				tcp = (&connections.TCPConnection{
 					Criteria: match,
 				}).Initialize()
 				tcp.Connection, err = net.Dial("tcp", u.Host)
 				c = tcp
-			case SCHEME_HTTP:
+			case SchemeHTTP:
 				c = (&connections.HTTPConnection{
 					Connection: *u,
 					Criteria:   match,

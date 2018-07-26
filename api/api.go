@@ -21,9 +21,12 @@ import (
 type MappingAction uint8
 
 const (
-	MAP_ACTION_NONE   MappingAction = 0x0
-	MAP_ACTION_ADD    MappingAction = 1 << 0
-	MAP_ACTION_DELETE MappingAction = 1 << 1
+	// MapActionNone no op action
+	MapActionNone MappingAction = 0x0
+	// MapActionAdd indicates addition of mapping
+	MapActionAdd MappingAction = 1 << 0
+	// MapActionDelete indicated deletion of mapping
+	MapActionDelete MappingAction = 1 << 1
 )
 
 // DPIDMapping is used to associate a DPID with an injecting packet processor
@@ -60,7 +63,7 @@ func (api *API) ListDevicesHandler(resp http.ResponseWriter, req *http.Request) 
 	i := 0
 	for key := range api.injectors {
 		data.Devices[i] = fmt.Sprintf("of:0x%016x", key)
-		i += 1
+		i++
 	}
 	api.lock.RUnlock()
 
@@ -138,14 +141,14 @@ func (api *API) dpidMappingUpdates() {
 		mapping := <-api.DPIDMappingListener
 
 		switch mapping.Action {
-		case MAP_ACTION_ADD:
+		case MapActionAdd:
 			log.WithFields(log.Fields{
 				"dpid": fmt.Sprintf("0x%016x", mapping.DPID),
 			}).Debug("Adding device mapping")
 			api.lock.Lock()
 			api.injectors[mapping.DPID] = mapping.Inject
 			api.lock.Unlock()
-		case MAP_ACTION_DELETE:
+		case MapActionDelete:
 			log.WithFields(log.Fields{
 				"dpid": fmt.Sprintf("0x%016x", mapping.DPID),
 			}).Debug("Deleting device mapping")

@@ -68,7 +68,7 @@ func TestPacketOutKnownDPID(t *testing.T) {
 	}
 
 	api.DPIDMappingListener <- DPIDMapping{
-		Action: MAP_ACTION_ADD,
+		Action: MapActionAdd,
 		DPID:   0x1,
 		Inject: mock,
 	}
@@ -118,7 +118,7 @@ func TestListDevices(t *testing.T) {
 	}
 
 	api.DPIDMappingListener <- DPIDMapping{
-		Action: MAP_ACTION_ADD,
+		Action: MapActionAdd,
 		DPID:   0x1,
 		Inject: mock,
 	}

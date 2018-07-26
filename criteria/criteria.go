@@ -7,8 +7,8 @@ package criteria
 // Defines the bit patterns used to indicate which values are set in the
 // match criteria structure.
 const (
-	BIT_EMPTY   = 0x0
-	BIT_DL_TYPE = 1 << 0
+	BitEmpty  = 0x0
+	BitDLType = 1 << 0
 )
 
 // Criteria is used to maintain match criteria values along with a bit set to
@@ -25,7 +25,7 @@ type Criteria struct {
 // additional values that are not in the target criteria and the values will
 // still be considered matched.
 func (c *Criteria) Match(state Criteria) bool {
-	if c.Set&BIT_DL_TYPE > 0 && (state.Set&BIT_DL_TYPE == 0 || c.DlType != state.DlType) {
+	if c.Set&BitDLType > 0 && (state.Set&BitDLType == 0 || c.DlType != state.DlType) {
 		return false
 	}
 	return true

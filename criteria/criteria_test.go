@@ -15,7 +15,7 @@ func TestZeroMatch(t *testing.T) {
 
 func TestIdentifyMatch(t *testing.T) {
 	c1 := Criteria{
-		Set:    BIT_DL_TYPE,
+		Set:    BitDLType,
 		DlType: 0x0800,
 	}
 
@@ -27,7 +27,7 @@ func TestIdentifyMatch(t *testing.T) {
 func TestLessThanMatch(t *testing.T) {
 	c1 := Criteria{}
 	c2 := Criteria{
-		Set:    BIT_DL_TYPE,
+		Set:    BitDLType,
 		DlType: 0x0800,
 	}
 
@@ -38,7 +38,7 @@ func TestLessThanMatch(t *testing.T) {
 
 func TestGreaterThanMatch(t *testing.T) {
 	c1 := Criteria{
-		Set:    BIT_DL_TYPE,
+		Set:    BitDLType,
 		DlType: 0x0800,
 	}
 	c2 := Criteria{}
@@ -49,11 +49,11 @@ func TestGreaterThanMatch(t *testing.T) {
 
 func TestDiffDlTypeMatch(t *testing.T) {
 	c1 := Criteria{
-		Set:    BIT_DL_TYPE,
+		Set:    BitDLType,
 		DlType: 0x0800,
 	}
 	c2 := Criteria{
-		Set:    BIT_DL_TYPE,
+		Set:    BitDLType,
 		DlType: 0x0810,
 	}
 

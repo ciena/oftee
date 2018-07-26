@@ -1,6 +1,14 @@
 
 help:
-	@echo "test       : runs static and golang tests"
+	@echo "build    : builds source code in a container"
+	@echo "errcheck : runs errcheck on oftee"
+	@echo "image    : builds Docker image"
+	@echo "itests   : runs integration tests, of which there are none"
+	@echo "lint     : runs lint"
+	@echo "run      : runs oftee in a container"
+	@echo "tests    : runs static and runtime tests"
+	@echo "utest    : runs go test"
+	@echo "vet      : runs go vet"
 
 PACKAGES=github.com/ciena/oftee github.com/ciena/oftee/criteria github.com/ciena/oftee/api github.com/ciena/oftee/connections github.com/ciena/oftee/injector
 
