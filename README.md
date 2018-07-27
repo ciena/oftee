@@ -12,6 +12,11 @@ applications that execute outside the SDN controller processes, i.e,
 that don't have to be written for a specific SDN controller such as
 `ONOS` or `ODL`.
 
+## Quick Start
+There is a sample work space github project at
+[http://github.com/dbainbri-ciena/oftee_workspace](http://github.com/dbainbri-ciena/oftee_workspace).
+Please visit this project to see `oftee` in action.
+
 ## SDN Application Initialization
 To utilize the OpenFlow tee the *external* SDN application or operator
 must perform some initialization so that the OpenFlow device does a
@@ -91,3 +96,9 @@ is configured to proxy to the SDN controller, typically port `6653` and the
 devices are configured to use the `oftee` as their SDN controller. If `oftee` is
 listening on port `8853` on IP `172.17.0.4` then the devices would set their
 controller to `tcp:172.17.0.4:8853`.
+
+## Credits
+I have advocated for the disaggregation of the control plane, both
+in the context of ONOS and ODL. This project originated out of a conversation
+with and suggestion by _[Sergio](https://github.com/Sergio-Slobodrian)_
+revolving around the topic of controller disaggregation.
