@@ -3,8 +3,10 @@
 package api
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"github.com/netrack/openflow"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -98,7 +100,7 @@ func (api *API) PacketOutHandler(resp http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		log.WithFields(log.Fields{
 			"dpid": vars["dpid"],
-		}).Warn("Unable to parse given DPID")
+		}).Warn("PacketOut rejected: Unable to parse given DPID")
 		http.Error(resp, fmt.Sprintf("DPID doesn't reference a device, '%s' : %s", vars["dpid"], err), http.StatusNotFound)
 		return
 	}
@@ -110,7 +112,7 @@ func (api *API) PacketOutHandler(resp http.ResponseWriter, req *http.Request) {
 	if !ok {
 		log.WithFields(log.Fields{
 			"dpid": vars["dpid"],
-		}).Warn("Unable to find packet injector for DPID, unknown device")
+		}).Warn("PacketOut rejected: Unable to find packet injector for DPID, unknown device")
 		http.Error(resp, fmt.Sprintf("DPID not found, '%s'", vars["dpid"]), http.StatusNotFound)
 		return
 	}
@@ -118,7 +120,59 @@ func (api *API) PacketOutHandler(resp http.ResponseWriter, req *http.Request) {
 	// Read the OpenFlow message from the body
 	data, err := ioutil.ReadAll(req.Body)
 	if err != nil {
+		log.
+			WithError(err).
+			WithFields(log.Fields{
+				"dpid": vars["dpid"],
+			}).
+			Warn("PacketOut rejected: Unable to read message from client")
 		http.Error(resp, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Validate the packet in. These are simple validations, so that
+	// the don't slow the processing of packets too much.
+
+	// Verify at least enough bytes to includ OF header
+	if len(data) < 8 { // len of OF header
+		log.
+			WithFields(log.Fields{
+				"dpid": vars["dpid"],
+				"len":  len(data),
+			}).
+			Warn("PacketOut rejected: smaller than minimum size")
+		http.Error(resp,
+			fmt.Sprintf("Specified OpenFlow packet is invalid, smaller than minimum size: %d",
+				len(data)), http.StatusBadRequest)
+		return
+	}
+
+	// Verify OFP type and len specified in OF header and bytes read match
+	if openflow.Type(data[1]) != openflow.TypePacketOut {
+		log.
+			WithFields(log.Fields{
+				"dpid": vars["dpid"],
+				"type": fmt.Sprintf("0x%0x", uint8(data[1])),
+			}).
+			Warn("PacketOut rejected: not Open Flow packet out message")
+		http.Error(resp,
+			fmt.Sprintf("Specified OpenFlow message is not a packet out: 0x%0x",
+				uint8(data[1])), http.StatusBadRequest)
+		return
+	}
+	specifiedSize := binary.BigEndian.Uint16(data[2:4])
+
+	if specifiedSize != uint16(len(data)) {
+		log.
+			WithFields(log.Fields{
+				"dpid":     vars["dpid"],
+				"expected": specifiedSize,
+				"actual":   len(data),
+			}).
+			Warn("PacketOut rejected: actuall len does not match len in OpenFlow header")
+		http.Error(resp,
+			fmt.Sprintf("Specified packet actual len does not match len in OpenFlow header: %d != %d",
+				specifiedSize, len(data)), http.StatusBadRequest)
 		return
 	}
 

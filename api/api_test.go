@@ -1,9 +1,15 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
+	"github.com/netrack/openflow"
+	"github.com/netrack/openflow/ofp"
 	log "github.com/sirupsen/logrus"
 	"io"
+	"net"
 	"net/http/httptest"
 	"testing"
 )
@@ -73,8 +79,60 @@ func TestPacketOutKnownDPID(t *testing.T) {
 		Inject: mock,
 	}
 
+	eth := layers.Ethernet{
+		SrcMAC:       net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+		DstMAC:       net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+		EthernetType: layers.EthernetTypeARP,
+	}
+	arp := layers.ARP{
+		AddrType:          layers.LinkTypeEthernet,
+		Protocol:          layers.EthernetTypeIPv4,
+		HwAddressSize:     6,
+		ProtAddressSize:   4,
+		Operation:         layers.ARPRequest,
+		SourceHwAddress:   []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+		SourceProtAddress: []byte{0x0, 0x0, 0x0, 0x0},
+		DstHwAddress:      []byte{0, 0, 0, 0, 0, 0},
+	}
+	arpBuf := gopacket.NewSerializeBuffer()
+	opts := gopacket.SerializeOptions{}
+	err := gopacket.SerializeLayers(arpBuf, opts,
+		&eth,
+		&arp)
+	if err != nil {
+		log.WithError(err).Error("serializing layers")
+		t.Error(err)
+	}
+	log.Printf("ARP: %02x", arpBuf.Bytes())
+
+	message := &bytes.Buffer{}
+	packet := &bytes.Buffer{}
+	po := ofp.PacketOut{
+		Buffer:  ofp.NoBuffer,
+		InPort:  2,
+		Actions: ofp.Actions{&ofp.ActionOutput{2, ofp.ContentLenNoBuffer}},
+	}
+	ofReq := openflow.NewRequest(openflow.TypePacketOut, packet)
+	_, err = po.WriteTo(packet)
+	if err != nil {
+		log.WithError(err).Error("writing packet to OFP")
+		t.Error(err)
+	}
+
+	_, err = packet.Write(arpBuf.Bytes())
+	if err != nil {
+		log.WithError(err).Error("writing arp to packet")
+		t.Error(err)
+	}
+
+	_, err = ofReq.WriteTo(message)
+	if err != nil {
+		log.WithError(err).Error("writing OF req to bytes")
+		t.Error(err)
+	}
+
 	resp := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "http://example.com:4242/oftee/0x0000000000000001", nil)
+	req := httptest.NewRequest("POST", "http://example.com:4242/oftee/0x0000000000000001", message)
 	req.Header.Add("Content-type", "application/octet-stream")
 	api.serveMux.ServeHTTP(resp, req)
 	log.Debugf("+%v\n", resp)
@@ -83,6 +141,86 @@ func TestPacketOutKnownDPID(t *testing.T) {
 	}
 	if len(mock.Messages) != 1 {
 		t.Errorf("Expected 1 message, found %d", len(mock.Messages))
+	}
+}
+
+func TestPacketOutShortPacket(t *testing.T) {
+	log.SetLevel(log.DebugLevel)
+	api := NewAPI(":4242")
+
+	go api.dpidMappingUpdates()
+
+	mock := &MockInjector{
+		DPID: 0x1,
+	}
+
+	api.DPIDMappingListener <- DPIDMapping{
+		Action: MapActionAdd,
+		DPID:   0x1,
+		Inject: mock,
+	}
+
+	eth := layers.Ethernet{
+		SrcMAC:       net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+		DstMAC:       net.HardwareAddr{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+		EthernetType: layers.EthernetTypeARP,
+	}
+	arp := layers.ARP{
+		AddrType:          layers.LinkTypeEthernet,
+		Protocol:          layers.EthernetTypeIPv4,
+		HwAddressSize:     6,
+		ProtAddressSize:   4,
+		Operation:         layers.ARPRequest,
+		SourceHwAddress:   []byte{0xff, 0xff, 0xff, 0xff, 0xff, 0xff},
+		SourceProtAddress: []byte{0x0, 0x0, 0x0, 0x0},
+		DstHwAddress:      []byte{0, 0, 0, 0, 0, 0},
+	}
+	arpBuf := gopacket.NewSerializeBuffer()
+	opts := gopacket.SerializeOptions{}
+	err := gopacket.SerializeLayers(arpBuf, opts,
+		&eth,
+		&arp)
+	if err != nil {
+		log.WithError(err).Error("serializing layers")
+		t.Error(err)
+	}
+	log.Printf("ARP: %02x", arpBuf.Bytes())
+
+	message := &bytes.Buffer{}
+	packet := &bytes.Buffer{}
+	po := ofp.PacketOut{
+		Buffer:  ofp.NoBuffer,
+		InPort:  2,
+		Actions: ofp.Actions{&ofp.ActionOutput{2, ofp.ContentLenNoBuffer}},
+	}
+	ofReq := openflow.NewRequest(openflow.TypePacketOut, packet)
+	_, err = po.WriteTo(packet)
+	if err != nil {
+		log.WithError(err).Error("writing packet to OFP")
+		t.Error(err)
+	}
+
+	_, err = packet.Write(arpBuf.Bytes())
+	if err != nil {
+		log.WithError(err).Error("writing arp to packet")
+		t.Error(err)
+	}
+
+	_, err = ofReq.WriteTo(message)
+	if err != nil {
+		log.WithError(err).Error("writing OF req to bytes")
+		t.Error(err)
+	}
+
+	resp := httptest.NewRecorder()
+	req := httptest.NewRequest("POST",
+		"http://example.com:4242/oftee/0x0000000000000001",
+		io.LimitReader(message, 10))
+	req.Header.Add("Content-type", "application/octet-stream")
+	api.serveMux.ServeHTTP(resp, req)
+	log.Debugf("+%v\n", resp)
+	if resp.Code != 400 {
+		t.Errorf("Incorrect response code, expected 400, got %d", resp.Code)
 	}
 }
 
