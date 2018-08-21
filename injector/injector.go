@@ -45,10 +45,10 @@ type OFDeviceInjector struct {
 // NewOFDeviceInjector creates an Injector instance.
 func NewOFDeviceInjector() Injector {
 	return &OFDeviceInjector{
-		dpid:            make(chan uint64),
+		dpid:            make(chan uint64, 10),
 		controller:      make(chan tlvHeader),
 		controllerError: make(chan error),
-		injector:        make(chan []byte),
+		injector:        make(chan []byte, 100),
 		headerReadWait:  make(chan bool),
 		headerStop:      make(chan bool),
 		mainStop:        make(chan bool),

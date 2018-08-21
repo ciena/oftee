@@ -20,7 +20,7 @@ type TCPConnection struct {
 // Initialize makes sure priviate members, that can't function from
 // zero state, are set correctly
 func (c *TCPConnection) Initialize() *TCPConnection {
-	c.queue = make(chan []byte, 25)
+	c.queue = make(chan []byte, 100)
 	return c
 }
 

@@ -225,7 +225,7 @@ func NewAPI(listenOn string) *API {
 		router:              mux.NewRouter(),
 		serveMux:            http.NewServeMux(),
 		injectors:           make(map[uint64]injector.Injector),
-		DPIDMappingListener: make(chan DPIDMapping),
+		DPIDMappingListener: make(chan DPIDMapping, 100),
 	}
 
 	api.router.
