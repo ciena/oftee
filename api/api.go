@@ -10,6 +10,9 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"os"
+	"runtime"
+	"runtime/pprof"
 	"strconv"
 	"sync"
 	"time"
@@ -42,6 +45,9 @@ type DPIDMapping struct {
 type API struct {
 	DPIDMappingListener chan DPIDMapping
 	ListenOn            string
+
+	MemProfile string
+	CPUProfile string
 
 	injectors map[uint64]injector.Injector
 	router    *mux.Router
@@ -83,6 +89,65 @@ func (api *API) ListDevicesHandler(resp http.ResponseWriter, req *http.Request) 
 			WithError(err).
 			Error("Unable to write device list to HTTP response")
 	}
+}
+
+// MemProfileHandler creates a snapshot memory profile
+func (api *API) MemProfileHandler(resp http.ResponseWriter, req *http.Request) {
+	if api.MemProfile != "" {
+		f, err := os.Create(api.MemProfile)
+		if err != nil {
+			http.Error(resp,
+				fmt.Sprintf("Unable to create memory profile : %s", err.Error()),
+				http.StatusInternalServerError)
+			log.WithError(err).
+				Error("Unable to create memory profile")
+			return
+		}
+		runtime.GC() // get up-to-date statistics
+		if err := pprof.WriteHeapProfile(f); err != nil {
+			http.Error(resp,
+				fmt.Sprintf("Unable to write memory profile : %s", err.Error()),
+				http.StatusInternalServerError)
+			log.WithError(err).
+				Error("Unable to write memory profile")
+			return
+		}
+		if err := f.Close(); err != nil {
+			http.Error(resp,
+				fmt.Sprintf("Unable to close memory profile : %s", err.Error()),
+				http.StatusInternalServerError)
+			log.WithError(err).
+				Error("Unable to close memory profile")
+		}
+	}
+}
+
+// StartCPUProfileHandler starts a CPU profile session
+func (api *API) StartCPUProfileHandler(resp http.ResponseWriter, req *http.Request) {
+	if api.CPUProfile != "" {
+		f, err := os.Create(api.CPUProfile)
+		if err != nil {
+			http.Error(resp,
+				fmt.Sprintf("Unable to create CPU profile : %s", err.Error()),
+				http.StatusInternalServerError)
+			log.WithError(err).
+				Error("Unable to create CPU profile")
+			return
+		}
+		if err := pprof.StartCPUProfile(f); err != nil {
+			http.Error(resp,
+				fmt.Sprintf("Unable to start CPU profile : %s", err.Error()),
+				http.StatusInternalServerError)
+			log.WithError(err).
+				Error("Unable to start CPU profile")
+			return
+		}
+	}
+}
+
+// StopCPUProfileHandler stops a CPU profile session
+func (api *API) StopCPUProfileHandler(resp http.ResponseWriter, req *http.Request) {
+	pprof.StopCPUProfile()
 }
 
 // PacketOutHandler handles an HTTP request to packet out to a given switch port. The payload to
@@ -219,15 +284,26 @@ func (api *API) dpidMappingUpdates() {
 }
 
 // NewAPI properly instantiates a new API instance.
-func NewAPI(listenOn string) *API {
+func NewAPI(listenOn string, cpuProfile string, memProfile string) *API {
 	api := &API{
 		ListenOn:            listenOn,
+		CPUProfile:          cpuProfile,
+		MemProfile:          memProfile,
 		router:              mux.NewRouter(),
 		serveMux:            http.NewServeMux(),
 		injectors:           make(map[uint64]injector.Injector),
 		DPIDMappingListener: make(chan DPIDMapping, 100),
 	}
 
+	api.router.
+		HandleFunc("/oftee/profile/cpu/start", api.StartCPUProfileHandler).
+		Methods("POST")
+	api.router.
+		HandleFunc("/oftee/profile/cpu/stop", api.StopCPUProfileHandler).
+		Methods("POST")
+	api.router.
+		HandleFunc("/oftee/profile/mem", api.MemProfileHandler).
+		Methods("POST")
 	api.router.
 		HandleFunc("/oftee/{dpid}", api.PacketOutHandler).
 		Methods("POST").

@@ -12,6 +12,7 @@ import (
 	"net"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 type DeviceList struct {
@@ -20,7 +21,7 @@ type DeviceList struct {
 
 func TestPacketOutNoDPID(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
-	api := NewAPI(":4242")
+	api := NewAPI(":4242", "", "")
 
 	resp := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "http://example.com/oftee", nil)
@@ -33,7 +34,7 @@ func TestPacketOutNoDPID(t *testing.T) {
 }
 
 func TestPacketOutUnknownDPID(t *testing.T) {
-	api := NewAPI(":4242")
+	api := NewAPI(":4242", "", "")
 
 	resp := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "http://example.com/oftee/0x1", nil)
@@ -65,7 +66,7 @@ func (*MockInjector) Copy(w io.Writer, r io.Reader) (int64, error) {
 
 func TestPacketOutKnownDPID(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
-	api := NewAPI(":4242")
+	api := NewAPI(":4242", "", "")
 
 	go api.dpidMappingUpdates()
 
@@ -77,6 +78,10 @@ func TestPacketOutKnownDPID(t *testing.T) {
 		Action: MapActionAdd,
 		DPID:   0x1,
 		Inject: mock,
+	}
+	// Wait for message to be processed
+	for len(api.DPIDMappingListener) > 0 {
+		time.Sleep(time.Duration(1) * time.Second)
 	}
 
 	eth := layers.Ethernet{
@@ -146,7 +151,7 @@ func TestPacketOutKnownDPID(t *testing.T) {
 
 func TestPacketOutShortPacket(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
-	api := NewAPI(":4242")
+	api := NewAPI(":4242", "", "")
 
 	go api.dpidMappingUpdates()
 
@@ -158,6 +163,10 @@ func TestPacketOutShortPacket(t *testing.T) {
 		Action: MapActionAdd,
 		DPID:   0x1,
 		Inject: mock,
+	}
+	// Wait for message to be processed
+	for len(api.DPIDMappingListener) > 0 {
+		time.Sleep(time.Duration(1) * time.Second)
 	}
 
 	eth := layers.Ethernet{
@@ -226,7 +235,7 @@ func TestPacketOutShortPacket(t *testing.T) {
 
 func TestListDevicesEmpty(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
-	api := NewAPI(":4242")
+	api := NewAPI(":4242", "", "")
 
 	resp := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "http://example.com:4242/oftee", nil)
@@ -247,7 +256,7 @@ func TestListDevicesEmpty(t *testing.T) {
 
 func TestListDevices(t *testing.T) {
 	log.SetLevel(log.DebugLevel)
-	api := NewAPI(":4242")
+	api := NewAPI(":4242", "", "")
 
 	go api.dpidMappingUpdates()
 
@@ -259,6 +268,10 @@ func TestListDevices(t *testing.T) {
 		Action: MapActionAdd,
 		DPID:   0x1,
 		Inject: mock,
+	}
+	// Wait for message to be processed
+	for len(api.DPIDMappingListener) > 0 {
+		time.Sleep(time.Duration(1) * time.Second)
 	}
 
 	resp := httptest.NewRecorder()

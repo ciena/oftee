@@ -48,15 +48,17 @@ following information:
 This application is configured via the environment. The following environment
 variables can be used:
 
-KEY                  TYPE                              DEFAULT    REQUIRED    DESCRIPTION
-HELP                 True or False                     false                  show this message
-LISTEN_ON            String                            :8000      true        connection on which to listen for an open flow device
-API_ON               String                            :8002      true        port on which to listen to accept API requests
-PROXY_TO             String                            :8001      true        connection on which to attach to an SDN controller
-TEE_TO               Comma-separated list of String    :8002                  list of connections on which tee packet in messages
-TEE_RAW              True or False                     true                   only tee raw packets to the client, openflow headers not included
-LOG_LEVEL            String                            debug                  logging level
-SHARE_CONNECTIONS    True or False                     true                   use shared connections to outbound end points
+KEY                  TYPE                              DEFAULT      REQUIRED    DESCRIPTION
+HELP                 True or False                     false                    show this message
+LISTEN_ON            String                            :8000        true        connection on which to listen for an open flow device
+API_ON               String                            :8002        true        port on which to listen to accept API requests
+PROXY_TO             String                            :8001        true        connection on which to attach to an SDN controller
+TEE_TO               Comma-separated list of String                             list of connections on which tee packet in messages
+TEE_RAW              True or False                     false                    only tee raw packets to the client, openflow headers not included
+LOG_LEVEL            String                            debug                    logging level
+SHARE_CONNECTIONS    True or False                     true                     use shared connections to outbound end points
+CPU_PROFILE          String                            cpu.pprof                file to which to write CPU profile data
+MEM_PROFILE          String                            mem.pprof                file to which to write MEM profile data
 ```
 
 ### Tee Configuration
@@ -96,6 +98,15 @@ is configured to proxy to the SDN controller, typically port `6653` and the
 devices are configured to use the `oftee` as their SDN controller. If `oftee` is
 listening on port `8853` on IP `172.17.0.4` then the devices would set their
 controller to `tcp:172.17.0.4:8853`.
+
+## API
+`oftee` supports five (5) REST endpoints:
+
+- `/oftee` - `GET` - returns a `JSON` structure of the devices (DPIDs) known to `oftee`
+- `/oftee/{dpid}` - `POST` - used to inject an OF packet out message to a device
+- `/oftee/profile/cpu/start` - `POST` - starts a CPU profile session
+- `/oftee/profile/cpu/stop` - `POST` - completes a CPU profile session
+- `/oftee/profile/mem` - `POST` - creates a memory profile dump
 
 ## Credits
 I have advocated for the disaggregation of the control plane, both

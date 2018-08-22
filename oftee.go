@@ -62,6 +62,8 @@ type App struct {
 	TeeRawPackets    bool     `envconfig:"TEE_RAW" default:"false" desc:"only tee raw packets to the client, openflow headers not included"`
 	LogLevel         string   `envconfig:"LOG_LEVEL" default:"debug" desc:"logging level"`
 	ShareConnections bool     `envconfig:"SHARE_CONNECTIONS" default:"true" desc:"use shared connections to outbound end points"`
+	CPUProfile       string   `envconfig:"CPU_PROFILE" default:"cpu.pprof" desc:"file to which to write CPU profile data"`
+	MemProfile       string   `envconfig:"MEM_PROFILE" default:"mem.pprof" desc:"file to which to write MEM profile data"`
 
 	listener  net.Listener
 	endpoints connections.Endpoints
@@ -617,7 +619,7 @@ func main() {
 	}
 
 	// Create and invoke the API sub-system
-	app.api = api.NewAPI(app.APIOn)
+	app.api = api.NewAPI(app.APIOn, app.CPUProfile, app.MemProfile)
 	go app.api.ListenAndServe()
 
 	// Connect to shared outbound end point connections, if requested
