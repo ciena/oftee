@@ -7,7 +7,7 @@ can be configured to *tee* OpenFlow *packet in* messages to third party
 applications via `Kafka` (future) and `REST` as well as supports an API
 (currently `REST` only) to *packet out* messages to a switch ports.
 
-The purpose of this utility filter is to allow the development if SDN
+The purpose of this utility filter is to allow the development of SDN
 applications that execute outside the SDN controller processes, i.e,
 that don't have to be written for a specific SDN controller such as
 `ONOS` or `ODL`.
